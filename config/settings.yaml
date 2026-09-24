@@ -1,0 +1,33 @@
+# All paths are overridable so the stack can move to a VPS unchanged.
+terminal:
+  install_dir: C:\Program Files\BlackBull Markets MT5
+  # Data dir of the live/demo terminal (where MQL5\ sources get synced for the host EA).
+  data_dir: ${APPDATA}\MetaQuotes\Terminal\16D9C17040576AD13C62C316983027D5
+  common_files: ${APPDATA}\MetaQuotes\Terminal\Common\Files
+
+tester:
+  # Portable copy used exclusively for Strategy Tester runs (created by scripts/setup_tester.py).
+  install_dir: runtime\tester
+  timeout_sec: 7200
+  # The tester needs <base><deposit ccy> crosses (e.g. XAUGBP) with full history to test in GBP;
+  # BlackBull's are short, so tests run in USD with the target deposit converted at today's rate.
+  currency: USD
+
+account:
+  # Backtests model the real target account, not the demo.
+  deposit: 100
+  currency: GBP
+  leverage: 100
+  # Demo is USD 1000; demo lot sizing is scaled so risk % mirrors the live target.
+  demo_scale_to_target: true
+  live_enabled: false
+
+research:
+  timeframes: [M15, M30, H1]
+  core_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD, XAGUSD, BTCUSD, ETHUSD, NAS100]
+  history_start: 2019-01-01
+  holdout_months: 12
+
+paths:
+  registry_db: runtime\registry.sqlite
+  reports: runtime\reports

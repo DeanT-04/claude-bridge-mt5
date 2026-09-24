@@ -1,0 +1,28 @@
+# Thresholds a candidate must clear before it may be proposed for demo.
+min_oos_trades: 150
+min_profit_factor: 1.25
+min_sharpe_annual: 0.8
+max_drawdown_pct: 35          # on OOS equity at the sized risk
+min_wfe: 0.5                  # walk-forward efficiency (OOS annualised / IS annualised)
+neighbourhood:
+  max_degradation: 0.35       # neighbours' median metric may fall at most 35% below the chosen point
+montecarlo:
+  runs: 2000
+  skip_prob: 0.05
+  dd95_max_pct: 45
+  ruin_dd_pct: 50
+  max_ruin_prob: 0.05
+cost_stress:
+  spread_mult: 1.5
+  extra_slippage_points: 2
+  min_profit_factor: 1.1
+benchmarks:
+  random_entry_runs: 500
+  max_p_value: 0.05
+  beat_buy_hold: true         # OOS Sharpe must exceed buy-and-hold Sharpe of the same asset
+dsr:
+  min_prob: 0.95              # Deflated Sharpe probability given all trials logged in the registry
+sizing:
+  kelly_fraction: 0.25
+  max_risk_pct: 5.0
+  min_risk_pct: 0.25

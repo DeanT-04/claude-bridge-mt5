@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mt5-bridge": {
+      "command": "python",
+      "args": ["-m", "bridge.mcp_server"],
+      "cwd": "."
+    }
+  }
+}
