@@ -1,4 +1,4 @@
-"""Strategy families. Each module exposes: EXPERT, Params, GRID, signals, backtest, grid_params, neighbours."""
-from . import donchian
+"""Strategy families. Each exposes: EXPERT, Params, GRID, signals, backtest, grid_params, neighbours."""
+from . import donchian, rules
 
-FAMILIES = {"donchian": donchian}
+FAMILIES = {"donchian": donchian, **rules.FAMILIES}

@@ -16,8 +16,9 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 def connect(path: Path | None = None) -> sqlite3.Connection:
     p = path or config.path(config.settings()["paths"]["registry_db"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(p)
+    con = sqlite3.connect(p, timeout=60)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")      # several research workers write concurrently
     con.executescript(SCHEMA.read_text())
     return con
 

@@ -127,6 +127,69 @@ def _brief(res: dict) -> dict:
 
 
 @mcp.tool()
+def universe(small_account_only: bool = False, limit: int = 100) -> dict:
+    """Researchable symbols from the last scan, cheapest first (cost_atr = spread / H1 ATR,
+    minlot_risk_pct = % of the £100 target lost by the minimum lot at a 1.5×ATR stop)."""
+    from research import universe as uni
+    rows = uni.load(small_account_only=small_account_only)
+    return {"total": len(rows), "symbols": rows[:limit]}
+
+
+@mcp.tool()
+def scan_universe(include_equities: bool = False) -> dict:
+    """Rescan every broker symbol and refresh the researchable / small-account lists (slow)."""
+    from research import universe as uni
+    rows = uni.scan(include_equities=include_equities, progress=lambda *_: None)
+    ok = [r for r in rows if r["researchable"]]
+    return {"scanned": len(rows), "researchable": len(ok), "small_account": sum(r["small_account"] for r in ok)}
+
+
+@mcp.tool()
+def enqueue_research(families: list[str], symbols: list[str], timeframes: list[str], redo: bool = False) -> dict:
+    """Queue gauntlet jobs. families: names or ['all']. symbols: names or ['small'|'researchable'|'core']."""
+    from research import jobqueue
+    from research.strategies import FAMILIES
+    from research import universe as uni
+    fams = list(FAMILIES) if families == ["all"] else families
+    if symbols in (["small"], ["researchable"]):
+        syms = [r["symbol"] for r in uni.load(small_account_only=symbols == ["small"])]
+    elif symbols == ["core"]:
+        syms = list(config.settings()["research"]["core_symbols"])
+    else:
+        syms = symbols
+    return {"enqueued": jobqueue.enqueue(fams, syms, timeframes, redo=redo)}
+
+
+@mcp.tool()
+def start_research(processes: int = 3, mt5_confirm: bool = True) -> dict:
+    """Start the queue worker in the background (Python gauntlets in parallel, then MT5
+    confirmation of survivors). Output goes to runtime/reports/research_worker.log."""
+    import subprocess
+    log = config.reports_dir() / "research_worker.log"
+    args = [sys.executable, str(config.ROOT / "scripts" / "research.py"), "run", "--procs", str(processes)]
+    if not mt5_confirm:
+        args.append("--no-mt5")
+    with open(log, "a") as fh:
+        p = subprocess.Popen(args, cwd=config.ROOT, stdout=fh, stderr=subprocess.STDOUT,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"pid": p.pid, "log": str(log)}
+
+
+@mcp.tool()
+def research_status() -> dict:
+    """Queue counts and verdict tallies."""
+    from research import jobqueue
+    return jobqueue.status()
+
+
+@mcp.tool()
+def research_survivors() -> list[dict]:
+    """Strategies that passed the gauntlet (or await MT5 confirmation), with OOS metrics and sizing."""
+    from research import jobqueue
+    return jobqueue.survivors()
+
+
+@mcp.tool()
 def list_gauntlets(limit: int = 20) -> list[dict]:
     """Most recent gauntlet verdicts from the registry."""
     return db.recent_gauntlets(db.connect(), limit)

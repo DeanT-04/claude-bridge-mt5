@@ -8,7 +8,7 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 | Milestone | Scope | State |
 |---|---|---|
 | M1 | Bridge, tester automation, research engine, gauntlet, MT5 parity | ✅ done |
-| M2 | Symbol auto-discovery + cost filter, 6–10 strategy templates, overnight queue | next |
+| M2 | Symbol auto-discovery + cost filter, 7 strategy families, research queue | 🔨 in progress |
 | M3 | Portfolio host EA, approval-gated demo deployment, monitoring, `promote_to_live` | planned |
 | M4 | Generated / genetic strategies (grammar → Python + MQL5) | planned |
 | M5 | ML strategies (ONNX) | planned |
@@ -24,9 +24,11 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 
 ## Layout
 - `bridge/`: MT5 access (`mt5_client`), MetaEditor compile, Strategy Tester automation, MCP server
-- `research/`: fast Python engine, strategy twins, gauntlet, Monte Carlo, sizing, benchmarks, MT5 confirm
-- `mql5/`: QB framework (`Include/QB`) and EAs (`Experts/QB`), synced into terminals on compile
-- `registry/`: SQLite schema/API (trials, runs, gauntlet verdicts, holdout usage)
+- `research/`: fast Python engine, MT5-exact indicators, strategy twins, gauntlet, Monte Carlo,
+  sizing, benchmarks, MT5 confirm, symbol universe (`universe.py`), job queue (`jobqueue.py`)
+- `mql5/`: QB framework (`Include/QB`, including `Signals.mqh`) and EAs (`Experts/QB`:
+  `QB_Rules` runs every rule family; `QB_Donchian` is the original standalone)
+- `registry/`: SQLite schema/API (trials, runs, gauntlet verdicts, holdout usage, universe, jobs)
 - `config/`: `settings.yaml` (paths, target account), `gauntlet.yaml` (pass thresholds)
 - `runtime/`: gitignored tester copy, reports, cache and registry db
 
@@ -40,12 +42,43 @@ runtime\tester\terminal64.exe /portable # once: log into a BlackBull demo (save 
 ## Use
 - MCP server (`.mcp.json`): `python -m bridge.mcp_server`. Tools: `account_info`, `list_symbols`,
   `symbol_spec`, `get_bars`, `compile_expert`, `run_backtest`, `run_optimization`,
-  `run_gauntlet`, `list_gauntlets`, `get_gauntlet`. None of them place orders.
-- CLI: `python scripts/run_gauntlet.py donchian XAUUSD H1 [--mt5]`
+  `run_gauntlet`, `universe`, `scan_universe`, `enqueue_research`, `start_research`,
+  `research_status`, `research_survivors`, `list_gauntlets`, `get_gauntlet`. None of them place orders.
+- Research CLI:
+  ```
+  python scripts/research.py scan                     # discover + filter all broker symbols
+  python scripts/research.py enqueue --families all --symbols small --tf H1,M30
+  python scripts/research.py run --procs 3            # parallel gauntlets, then MT5 confirm
+  python scripts/research.py status | survivors
+  ```
+  `--symbols` takes `small` (fits £100), `researchable`, `core` or a comma list.
+- Single gauntlet: `python scripts/run_gauntlet.py <family> XAUUSD H1 [--mt5]`
+- Parity check: `python scripts/parity_check.py XAUUSD H1 2024-01-01 2024-07-01 [families]`
 - Tests: `python -m pytest`
 
+## Strategy families
+All share the same execution: entry at the bar open on a closed-bar signal, ATR stop and target,
+time exit and a session filter.
+
+| Family | Signal | Parity vs MT5 (XAUUSD H1, H1 2024) |
+|---|---|---|
+| `donchian` | close breaks the N-bar channel | 99.5% |
+| `ema_pullback` | trend by fast/slow EMA; bar tags the fast EMA and closes back with the trend | 98.5% |
+| `rsi_reversion` | RSI crosses back out of oversold/overbought | 98.7% |
+| `bb_reversion` | close re-enters the Bollinger band | 99.3% |
+| `orb` | close crosses today's opening range (server hours) | 99.3% |
+| `keltner` | close crosses EMA ± k·ATR | 100% |
+| `hour_momentum` | at a fixed hour, trade the direction of the last N bars | 100% |
+
+## Symbol universe
+`research/universe.py` scans every tradable non-equity symbol (equities optional) and records
+history depth, `cost_atr` (median spread ÷ median H1 ATR) and `minlot_risk_pct` (the % of £100
+lost by the minimum lot at a 1.5×ATR stop). **Researchable** means cost_atr ≤ 0.15 and ≥ 3 years
+of history. **Small-account** additionally means the minimum lot fits the 5% risk cap.
+
 ## The gauntlet (gate to demo)
-Walk-forward (24-month in-sample, 6-month out-of-sample windows) → plateau/neighbourhood
+Pre-screen (150 random configs; the best must reach Sharpe 0.5, or the job stops early) →
+walk-forward (in-sample/out-of-sample months: M15 12/3, M30 18/4, H1 24/6) → plateau/neighbourhood
 stability → Deflated Sharpe over every configuration ever tried → fractional-Kelly sizing capped
 by Monte Carlo drawdown → cost stress (1.5× spread + slippage) → random-entry and buy-and-hold
 benchmarks → £100 min-lot feasibility → one-shot 12-month holdout → MT5 parity and cost stress.

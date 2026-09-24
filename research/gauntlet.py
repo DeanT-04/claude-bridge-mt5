@@ -18,8 +18,12 @@ from . import benchmarks, montecarlo, sizing, stats
 from .engine import Costs, Trade, simulate
 from .strategies import FAMILIES
 
-IS_MONTHS, OOS_MONTHS = 24, 6
+# Walk-forward window lengths (in-sample, out-of-sample months) per timeframe. Lower timeframes
+# have less history on BlackBull (terminal max-bars cap) but more trades per month.
+WF_MONTHS = {"M15": (12, 3), "M30": (18, 4), "H1": (24, 6), "H4": (36, 9)}
 MIN_IS_TRADES = 30
+SCREEN_CONFIGS = 150         # random configs tried in the pre-screen
+SCREEN_MIN_SHARPE = 0.5      # best pre-holdout Sharpe among them must reach this to continue
 
 
 @dataclass
@@ -35,7 +39,8 @@ def _month_ts(ts: int, months: int) -> int:
     return int(d.replace(year=d.year + y, month=m + 1, day=1).timestamp())
 
 
-def walk_forward_windows(times: np.ndarray, end_idx: int) -> list[Window]:
+def walk_forward_windows(times: np.ndarray, end_idx: int, timeframe: str = "H1") -> list[Window]:
+    IS_MONTHS, OOS_MONTHS = WF_MONTHS.get(timeframe, WF_MONTHS["H1"])
     out = []
     t = int(times[0])
     while True:
@@ -96,15 +101,13 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, 
     times = bars["time"]
     hold_start_t = _month_ts(int(times[-1]), -config.settings()["research"]["holdout_months"])
     hold_idx = int(np.searchsorted(times, hold_start_t))
-    windows = walk_forward_windows(times, hold_idx)
+    windows = walk_forward_windows(times, hold_idx, timeframe)
     if not windows:
         return _finish(con, family, symbol, timeframe, {}, "fail",
                        {"data": {"pass": False, "reason": "not enough history for walk-forward"}})
 
     grid = fam.grid_params()
-    progress(f"walk-forward: {len(windows)} windows x {len(grid)} configs")
 
-    # ---- 1. walk-forward optimisation --------------------------------------------------
     def sigs(p):
         return fam.signals(bars, p)
 
@@ -112,10 +115,27 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, 
         d, sl, tp = sigs(p)
         return simulate(bars, d, sl, tp, p.InpMaxBars, c, a, b)
 
-    # One pass over the grid: signals computed once per config, scored on every IS window
-    # and on the whole pre-holdout span (used for plateau selection below).
     a0, a1 = windows[0].is_start, hold_idx
     span_all = _span(bars, a0, a1)
+
+    # ---- 0. pre-screen: skip the full walk-forward when no sampled config shows promise ----
+    rng = np.random.default_rng(len(grid))
+    sample = [grid[i] for i in rng.choice(len(grid), min(SCREEN_CONFIGS, len(grid)), replace=False)]
+    screen_rows, best_screen = [], -math.inf
+    for p in sample:
+        tr = bt(p, a0, a1)
+        best_screen = max(best_screen, _score(tr, span_all)[0])
+        screen_rows.append((p.dict(), stats.trade_sharpe(np.array([t.r for t in tr])), len(tr)))
+    stages["screen"] = {"pass": best_screen >= SCREEN_MIN_SHARPE, "best_sharpe": best_screen,
+                        "configs": len(sample)}
+    if not stages["screen"]["pass"]:
+        db.log_trials(con, family, symbol, timeframe, screen_rows)   # these evaluations count too
+        return _finish(con, family, symbol, timeframe, {}, "fail", stages)
+    progress(f"walk-forward: {len(windows)} windows x {len(grid)} configs")
+
+    # ---- 1. walk-forward optimisation --------------------------------------------------
+    # One pass over the grid: signals computed once per config, scored on every IS window
+    # and on the whole pre-holdout span (used for plateau selection below).
     is_spans = [_span(bars, w.is_start, w.is_end) for w in windows]
     is_scores = np.full((len(grid), len(windows)), -math.inf)
     full_scores = {}

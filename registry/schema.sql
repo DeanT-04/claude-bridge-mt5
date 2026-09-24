@@ -38,3 +38,27 @@ CREATE TABLE IF NOT EXISTS holdout_uses (
     result      TEXT,
     used        TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS universe (
+    symbol          TEXT PRIMARY KEY,
+    grp             TEXT,
+    researchable    INTEGER,
+    small_account   INTEGER,
+    metrics         TEXT,           -- JSON from research.universe.scan
+    updated         TEXT
+);
+
+-- Research queue: python gauntlets run in parallel; MT5 confirmation runs serially after.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          INTEGER PRIMARY KEY,
+    family      TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    timeframe   TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | error
+    gauntlet_id INTEGER,
+    verdict     TEXT,
+    error       TEXT,
+    created     TEXT NOT NULL DEFAULT (datetime('now')),
+    started     TEXT,
+    finished    TEXT
+);
