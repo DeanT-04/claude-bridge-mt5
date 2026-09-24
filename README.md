@@ -101,4 +101,12 @@ Thresholds are in `config/gauntlet.yaml`.
   only suit a larger or prop account.
 - First candidate (Donchian breakout, XAUUSD H1) **failed**. It looked good in-sample
   (Sharpe ≈ 1.0) but had a walk-forward out-of-sample Sharpe of −0.34 and a random-entry p-value of 0.60.
+- **Broker history understates spreads.** BTCUSD records a spread of 0 on 57% of H1 bars
+  (live: 1300 pts), and XAUUSD history shows 12 pts against 22 live. Research therefore charges
+  each bar max(history spread, live spread). Parity checks keep the raw spreads so they compare
+  like with like against MT5's tester.
+- Universe (2026-09-24): 197 non-equity symbols scanned, 56 researchable, 41 fit £100 (25 FX,
+  8 crypto, 6 indices, Brent, WTI). Gold, silver, NAS100, US30, JPN225 and BTCUSD are researchable
+  but larger/prop account only (min lot risks 6–20% of £100).
+- First queue test (all 7 families on XAUUSD H1): all failed. Keltner came closest (OOS Sharpe 0.12).
 - MT5 build 6182 starts its own built-in MCP server (127.0.0.1:22346); to be explored.

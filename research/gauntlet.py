@@ -68,9 +68,12 @@ def _span(bars, a, b) -> float:
     return max((bars["time"][b - 1] - bars["time"][a]) / 86400, 1.0)
 
 
-def costs_for(spec: dict, spread_mult: float = 1.0, slip: float = 0.0) -> Costs:
+def costs_for(spec: dict, spread_mult: float = 1.0, slip: float = 0.0, floor: bool = True) -> Costs:
+    """Research costs. floor=True charges at least the live spread (history understates it);
+    floor=False reproduces the MT5 tester's own spread handling, for parity checks."""
     comm = config.settings().get("costs", {}).get("commission_price", {}).get(spec["name"], 0.0)
-    return Costs(point=spec["point"], spread_mult=spread_mult, slippage_points=slip, commission_price=comm)
+    return Costs(point=spec["point"], spread_mult=spread_mult, slippage_points=slip, commission_price=comm,
+                 min_spread_points=float(spec.get("spread", 0)) if floor else 0.0)
 
 
 def acct_to_target_rate(get_spec, acct_ccy: str, target_ccy: str) -> float:

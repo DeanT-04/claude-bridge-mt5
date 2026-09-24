@@ -58,7 +58,8 @@ def scan(groups: list[str] | None = None, include_equities: bool = False, progre
             if len(recent) < 500:
                 continue
             atr = np.nanmedian(atr_sma(recent, 14))
-            spread = float(np.median(recent["spread"])) * s.point
+            # history understates spreads on some symbols; take the larger of history and live
+            spread = max(float(np.median(recent["spread"])), float(s.spread)) * s.point
             if not atr or atr <= 0:
                 continue
             tick_value = s.trade_tick_value_loss or s.trade_tick_value
@@ -70,8 +71,8 @@ def scan(groups: list[str] | None = None, include_equities: bool = False, progre
                 "atr_h1": float(atr), "spread_median": spread, "minlot_risk_pct": round(float(risk_pct), 2),
                 "volume_min": s.volume_min, "bars_per_day": round(len(recent) / 730 * 7 / 5, 1),
             }
-            row["researchable"] = row["cost_atr"] <= MAX_COST_ATR and years >= MIN_HISTORY_YEARS
-            row["small_account"] = row["researchable"] and risk_pct <= sizing["max_risk_pct"]
+            row["researchable"] = bool(row["cost_atr"] <= MAX_COST_ATR and years >= MIN_HISTORY_YEARS)
+            row["small_account"] = bool(row["researchable"] and risk_pct <= sizing["max_risk_pct"])
             out.append(row)
             if k % 25 == 0:
                 progress(f"  {k}/{len(syms)}")

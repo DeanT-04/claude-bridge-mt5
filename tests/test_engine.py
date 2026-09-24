@@ -61,6 +61,13 @@ def test_short_uses_ask_with_spread():
     assert tr[0].entry == 100 and tr[0].exit == 97 and tr[0].reason == "tp"
 
 
+def test_spread_floor_applies_when_history_spread_is_zero():
+    b = mk([(100, 100, 100, 100), (100, 100.5, 99.5, 100), (100, 110, 100, 105)], spread=0)
+    raw = simulate(b, *sig(3, 1, 1, 2.0, 5.0), max_bars=10, costs=C0)
+    floored = simulate(b, *sig(3, 1, 1, 2.0, 5.0), max_bars=10, costs=Costs(point=0.01, min_spread_points=50))
+    assert raw[0].entry == 100 and floored[0].entry == pytest.approx(100.5)
+
+
 def test_atr_is_sma_of_true_range():
     b = mk([(10, 12, 9, 11), (11, 13, 10, 12), (12, 12, 8, 9)])
     a = atr_sma(b, 2)

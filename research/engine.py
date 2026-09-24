@@ -23,6 +23,9 @@ class Costs:
     spread_mult: float = 1.0
     slippage_points: float = 0.0   # adverse, applied to entry and exit
     commission_price: float = 0.0  # round-trip commission expressed in price units
+    # Broker history understates spreads (BTCUSD records 0 on most bars; XAUUSD 12 vs 22 live),
+    # so each bar is charged at least this many points.
+    min_spread_points: float = 0.0
 
 
 @dataclass
@@ -47,7 +50,7 @@ def simulate(bars: np.ndarray, direction: np.ndarray, sl_dist: np.ndarray, tp_di
     """direction[i] in {-1,0,1} is the signal to enter at the open of bar i."""
     o, h, l = bars["open"], bars["high"], bars["low"]
     t = bars["time"]
-    spr = bars["spread"].astype(float) * costs.point * costs.spread_mult
+    spr = np.maximum(bars["spread"].astype(float), costs.min_spread_points) * costs.point * costs.spread_mult
     slip = costs.slippage_points * costs.point
     end = len(bars) if end is None else end
     trades: list[Trade] = []

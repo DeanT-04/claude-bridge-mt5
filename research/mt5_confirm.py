@@ -76,11 +76,11 @@ def make(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
             return {"pass": False, "stage": "mt5_backtest", "error": base.error}
         a = int(np.searchsorted(bars["time"], t_from))
         z = int(np.searchsorted(bars["time"], int(t_to) + 86400))
-        py = fam.backtest(bars, params, costs_for(spec), a, z)
+        py = fam.backtest(bars, params, costs_for(spec, floor=False), a, z)   # mirror the tester
         par = parity(py, base.trades, BAR_SECONDS[timeframe])
 
         cs = g["cost_stress"]
-        med_spread = int(np.median(bars["spread"][a:])) or spec["spread"]
+        med_spread = max(int(np.median(bars["spread"][a:])), int(spec.get("spread", 0)))
         stressed = tester.run(tester.Job(fam.EXPERT, symbol, timeframe, d0, d1, params=dict(inputs),
                                          deposit=NOTIONAL_DEPOSIT, spread=int(round(med_spread * cs["spread_mult"]))
                                          + int(cs["extra_slippage_points"])))
