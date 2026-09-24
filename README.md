@@ -109,4 +109,11 @@ Thresholds are in `config/gauntlet.yaml`.
   8 crypto, 6 indices, Brent, WTI). Gold, silver, NAS100, US30, JPN225 and BTCUSD are researchable
   but larger/prop account only (min lot risks 6–20% of £100).
 - First queue test (all 7 families on XAUUSD H1): all failed. Keltner came closest (OOS Sharpe 0.12).
+- **First research batch (2026-09-24, 574 gauntlets: 7 families × 41 £100-feasible symbols ×
+  H1/M30): 0 passes.** 482 stopped at the pre-screen, 70 at walk-forward, 1 at the Deflated Sharpe
+  test, and 21 had too little history (SOLUSD/XLMUSD/DOGEUSD H1). Near-misses were trend-following
+  on alt-coins (EMA pullback DOTUSD M30 OOS Sharpe 1.33, Keltner SOLUSD M30 1.25, Keltner DOTUSD
+  H1 1.22), Keltner SPX500 H1 (1.03) and Donchian/ORB USDJPY M30. Their profit factors of 1.1–1.2 sit below
+  the 1.25 gate, and none survives the multiple-testing correction. RSI reversion on USDCAD H1
+  passed every stage except the Deflated Sharpe test (DSR 0.07). The 12-month holdout is still unused for all of them.
 - MT5 build 6182 starts its own built-in MCP server (127.0.0.1:22346); to be explored.
