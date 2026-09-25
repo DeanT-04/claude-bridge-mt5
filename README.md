@@ -35,7 +35,7 @@ The tiers were set after the synthetic calibration and before any real strategy 
 
 ## Headline result (2026-09-25)
 **No strategy has passed yet. That's the honest outcome, and the evidence is in the dashboard and the vault.**
-- More than 120 strategy tests ran on NQ and ES, with several hundred counted trials: batches 1–4, regime-filtered variants, indicator templates, inbox-derived ideas, a portfolio, and FTMO/Blueberry transfers.
+- The full catalogue ran: **143 of 143 planned tests (100%)**, **1,581 counted trials**, **0 passes**. It covers 63 pre-registered strategies on NQ and ES (batches 1–4: classic families, regime-filtered variants, indicator templates, inbox-derived ideas), a portfolio, and FTMO 2-Step and Blueberry Prime transfers.
 - Real timing is common: dozens of strategies beat at least 95% of random-entry runs.
 - A statistically real, tradeable edge isn't. Out-of-sample Deflated Sharpe is at most about 0.3 everywhere.
 - Under Apex, the best strategy reaches a payout on about 11% of purchased evaluations.
