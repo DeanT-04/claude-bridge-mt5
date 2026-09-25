@@ -159,3 +159,14 @@ def test_oco_both_touched_picks_side_nearer_open_then_checks_stop() -> None:
     o.sl_pts[0] = 3
     t = run(md, o, COSTS).trades_frame().row(0, named=True)
     assert t["dir"] == 1 and t["reason"] == core.EXIT_SL
+
+
+def test_evening_positions_are_inside_the_session() -> None:
+    # session opens 18:00: enter 18:01, exit on a signal at 03:00, flat time 16:10 not hit
+    minutes = [1080, 1081, 1082, 1439, 0, 180, 181, 600]
+    bars = [(100, 101, 99, 100)] * 3 + [(100, 105, 99, 104)] + [(104, 105, 103, 104)] * 4
+    md = md_from(bars, minutes=minutes)
+    o = buy(Orders.empty(md.n), 0)
+    o.exit_sig[5] = True
+    t = run(md, o, COSTS).trades_frame().row(0, named=True)
+    assert t["entry_i"] == 1 and t["exit_i"] == 6 and t["reason"] == core.EXIT_SIGNAL

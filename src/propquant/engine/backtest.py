@@ -11,6 +11,12 @@ from propquant.data.bars import TZ
 from propquant.engine import core
 
 DEFAULT_FLAT_MINUTE = 16 * 60 + 10  # 16:10 ET: the proxy has no bars 16:15-17:00
+SESSION_OPEN_MINUTE = 18 * 60  # CME sessions open at 18:00 ET the evening before
+
+
+def session_minutes(clock_minutes):
+    """Minutes since the 18:00 ET session open (keeps evening bars before the morning)."""
+    return (clock_minutes - SESSION_OPEN_MINUTE) % 1440
 
 
 @dataclass
@@ -155,10 +161,11 @@ class Result:
 def run(md: MarketData, orders: Orders, costs: Costs, flat_minute: int = DEFAULT_FLAT_MINUTE,
         max_per_session: int = 1_000_000):  # fmt: skip
     d_close, d_low, d_high, trades = core.run(
-        md.open, md.high, md.low, md.close, md.minute, md.sess,
+        md.open, md.high, md.low, md.close, session_minutes(md.minute), md.sess,
         orders.order_type, orders.order_dir, orders.order_px, orders.order_px2, orders.sl_pts,
         orders.tp_pts,
-        orders.exit_sig, flat_minute, costs.tick, costs.point_value, costs.slip_ticks,
+        orders.exit_sig, session_minutes(flat_minute), costs.tick, costs.point_value,
+        costs.slip_ticks,
         costs.commission_side, max_per_session,
     )  # fmt: skip
     return Result(d_close, d_low, d_high, trades, md)

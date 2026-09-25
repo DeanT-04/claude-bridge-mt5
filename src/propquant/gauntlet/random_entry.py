@@ -8,6 +8,8 @@ same way. The strategy's total OOS P&L is ranked against these runs.
 import numpy as np
 from numba import njit, prange
 
+from propquant.engine.backtest import session_minutes
+
 # numba only supports the legacy global RNG inside jitted code (seeded per run below).
 # ruff: noqa: NPY002
 
@@ -48,10 +50,12 @@ def benchmark(md, trades: np.ndarray, point_value: float, cost_rt: float, runs: 
         return np.zeros(runs)
     entry_i = trades[:, 0].astype(np.int64)
     exit_i = trades[:, 1].astype(np.int64)
-    mins = md.minute[entry_i]
+    smin = session_minutes(md.minute)
+    mins = smin[entry_i]
     return _runs(
-        md.open, md.close, md.minute, md.sess, md.sess_start, entry_i, exit_i,
-        int(mins.min()), int(mins.max()), flat_minute, point_value, cost_rt, runs, seed,
+        md.open, md.close, smin, md.sess, md.sess_start, entry_i, exit_i,
+        int(mins.min()), int(mins.max()), int(session_minutes(flat_minute)), point_value,
+        cost_rt, runs, seed,
     )  # fmt: skip
 
 

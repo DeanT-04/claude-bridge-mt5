@@ -26,12 +26,13 @@ Why the tiers look like this: [[85 percent pass needs an extreme edge]].
 |---|---|---|---|---|---|---|---|---|
 | 1 | [[orb]] | graveyard | eod | 8% | 27% | $-93 | 0.06 | 100% |
 | 2 | [[late_trend]] | graveyard | eod | 6% | 26% | $-219 | 0.21 | 100% |
-| 3 | [[gap_fade]] | graveyard | eod | 4% | 28% | $-462 | 0.01 | 94% |
-| 4 | [[ib_breakout]] | graveyard | intraday | 2% | 13% | $-82 | 0.03 | 98% |
-| 5 | [[control_random]] | graveyard | intraday | 1% | 11% | $-243 | 0.00 | 47% |
-| 6 | [[intraday_momentum]] | graveyard | intraday | 0% | 1% | $-249 | 0.00 | 43% |
+| 3 | [[overnight_drift]] | graveyard | eod | 5% | 19% | $-494 | 0.01 | 84% |
+| 4 | [[gap_fade]] | graveyard | eod | 4% | 28% | $-462 | 0.01 | 94% |
+| 5 | [[ib_breakout]] | graveyard | intraday | 2% | 13% | $-82 | 0.03 | 98% |
+| 6 | [[control_random]] | graveyard | intraday | 1% | 11% | $-243 | 0.00 | 47% |
+| 7 | [[intraday_momentum]] | graveyard | intraday | 0% | 1% | $-249 | 0.00 | 43% |
 
-_6 strategies. Ranked by tier, then by reach-payout rate._
+_7 strategies. Ranked by tier, then by reach-payout rate._
 <!-- AUTO:leaderboard:end -->
 
 ## Map

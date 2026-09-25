@@ -28,3 +28,10 @@ Timing that beats chance but has a low Sharpe is ideal **raw material for combin
 2. Add regime filters that are known before the session (prior-day volatility, overnight range, calendar days) to the families with real timing, and register them as new ideas, since they are new trials.
 3. Try ES as well as NQ for the same families.
 4. Drop intraday momentum and plain gap fade unless there is new evidence.
+
+## Update: overnight drift (batch 2, same day)
+[[overnight_drift]] went to the Graveyard: Deflated Sharpe 0.006, beats 84% of random entries, 5.4% reach a payout.
+
+- The only variant chosen in every fold was "only after an up day".
+- The documented overnight premium doesn't survive out of sample on NQ from 2019 to 2025 at a level usable for Apex.
+- Engine fix found along the way: flat-time logic now uses minutes since the 18:00 ET session open, so evening positions are handled correctly. Batch 1 was unaffected because it only trades in the daytime.

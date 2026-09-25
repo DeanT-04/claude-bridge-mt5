@@ -15,7 +15,9 @@ Pessimistic fill model:
            is checked (the target is never credited on the bar of entry). Stops that gap are
            filled at the open.
   signal   an exit signal at bar i closes the position at bar i+1's open, `slip` adverse
-  flat     positions are closed at the close of the last bar before `flat_minute` (ET), or at
+  minutes  `minute` and `flat_minute` are minutes since the 18:00 ET session open (the
+           caller converts clock time), so evening bars sort before the morning.
+  flat     positions are closed at the close of the last bar before `flat_minute`, or at
            the last bar of the session, `slip` ticks adverse.
 Per-bar outputs (USD per micro, commissions included) feed `propquant.firms.sim` directly:
   d_close = equity change close-to-close; d_low / d_high = worst / best point inside the bar.
