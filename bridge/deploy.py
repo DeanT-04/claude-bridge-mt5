@@ -19,7 +19,16 @@ from registry import db
 
 from . import config
 
-TARGETS = ("demo", "live")
+def targets() -> tuple[str, ...]:
+    """Deployment targets = configured terminals (demo, live, and any prop accounts)."""
+    return tuple(config.settings().get("terminals", {"demo": {}, "live": {}}))
+
+
+def account_mode(target: str) -> str:
+    """What QB_Host must see: 'demo' or 'live'. Prop challenges often run on demo-mode servers."""
+    if target in ("demo", "live"):
+        return target
+    return config.settings()["terminals"][target].get("account_mode", "demo")
 
 
 @dataclass
@@ -53,20 +62,33 @@ class Portfolio:
     max_total_dd_pct: float = 30
     max_open_risk_pct: float = 6
     reset_halt: int = 0
+    # prop-firm rules (see config/propfirms.yaml); prop_profile "" = none
+    prop_profile: str = ""
+    prop_initial_balance: float = 0.0
+    daily_loss_basis: str = "equity"
+    max_dd_mode: str = "trailing"
+    weekend_flat_hour: int = 0
+    news_blackout_min: int = 0
     sleeves: list[Sleeve] = field(default_factory=list)
 
     def render(self) -> str:
         head = [f"# QB_Host portfolio config ({self.target}). Written by bridge/deploy.py - do not hand-edit.",
-                f"version={self.version}", f"account={self.target}", f"enabled={int(self.enabled)}",
+                f"version={self.version}", f"account={account_mode(self.target)}", f"enabled={int(self.enabled)}",
                 f"balance_scale={self.balance_scale:.6g}", f"max_daily_loss_pct={self.max_daily_loss_pct:g}",
                 f"max_total_dd_pct={self.max_total_dd_pct:g}", f"max_open_risk_pct={self.max_open_risk_pct:g}",
                 f"reset_halt={self.reset_halt}"]
+        if self.prop_profile:
+            head += [f"# prop profile: {self.prop_profile}",
+                     f"prop_initial_balance={self.prop_initial_balance:g}", f"daily_loss_basis={self.daily_loss_basis}",
+                     f"max_dd_mode={self.max_dd_mode}", f"weekend_flat_hour={self.weekend_flat_hour}",
+                     f"news_blackout_min={self.news_blackout_min}"]
         return "\n".join(head + [s.line() for s in sorted(self.sleeves, key=lambda s: s.id)]) + "\n"
 
 
 # ------------------------------------------------------------------ files
 def config_path(target: str) -> Path:
-    _check_target(target)
+    if target not in targets():
+        raise ValueError(f"target must be one of {targets()}")
     return config.common_files() / "QB" / f"portfolio_{target}.cfg"
 
 
@@ -75,11 +97,15 @@ def status_path(target: str) -> Path:
 
 
 def _check_target(target: str) -> None:
-    if target not in TARGETS:
-        raise ValueError(f"target must be one of {TARGETS}")
-    if target == "live" and not config.settings()["account"].get("live_enabled"):
+    if target not in targets():
+        raise ValueError(f"target must be one of {targets()}")
+    acc = config.settings()["account"]
+    if target == "live" and not acc.get("live_enabled"):
         raise PermissionError("live deployment is disabled: set account.live_enabled: true in "
                               "config/settings.yaml yourself once a live account is logged in")
+    if target not in ("demo", "live") and target not in (acc.get("enabled_targets") or []):
+        raise PermissionError(f"target {target!r} is disabled: add it to account.enabled_targets in "
+                              "config/settings.yaml yourself once that account is logged in")
 
 
 def current(target: str, con=None) -> Portfolio:
@@ -122,6 +148,26 @@ def sleeve_from_gauntlet(g: dict, sleeve_id: int, allow_unvalidated: bool) -> Sl
                   gauntlet_id=g["id"], validated=validated)
 
 
+def apply_prop_profile(p: Portfolio, name: str) -> None:
+    """Copy a prop profile's rules into the host config, tightened by prop_safety_buffer so the
+    EA stops before the firm's own limit is touched ("" clears prop rules)."""
+    if not name:
+        p.prop_profile, p.prop_initial_balance = "", 0.0
+        return
+    from research.propfirm import profiles
+    prof = profiles()[name]
+    buf = config.settings()["deployment"].get("prop_safety_buffer", 0.8)
+    p.prop_profile = name
+    p.prop_initial_balance = prof.account_size
+    p.max_daily_loss_pct = round(prof.max_daily_loss_pct * buf, 3)
+    p.max_total_dd_pct = round(prof.max_total_dd_pct * buf, 3)
+    p.daily_loss_basis = prof.daily_loss_basis
+    p.max_dd_mode = prof.max_dd_mode
+    p.weekend_flat_hour = prof.weekend_flat_hour
+    p.news_blackout_min = prof.news_blackout_min
+    p.balance_scale = 1.0
+
+
 def demo_balance_scale(account: dict, rate_target_to_acct: float) -> float:
     """Scale demo equity so position sizes match the target account (e.g. £100 on a $1000 demo)."""
     target_in_acct = config.settings()["account"]["deposit"] * rate_target_to_acct
@@ -132,10 +178,10 @@ def demo_balance_scale(account: dict, rate_target_to_acct: float) -> float:
 def propose(target: str, add_gauntlets: list[int] | None = None, remove_sleeves: list[int] | None = None,
             allow_unvalidated: bool = False, enabled: bool = True, limits: dict | None = None,
             balance_scale: float | None = None, reset_halt: bool = False, note: str = "",
-            add_sleeves: list[Sleeve] | None = None, con=None) -> dict:
+            add_sleeves: list[Sleeve] | None = None, prop_profile: str | None = None, con=None) -> dict:
     _check_target(target)
     con = con or db.connect()
-    if allow_unvalidated and target == "live":
+    if allow_unvalidated and target != "demo":
         raise PermissionError("unvalidated sleeves may only run on demo")
     cur = current(target, con)
     new = Portfolio(**{**asdict(cur), "sleeves": []})
@@ -159,8 +205,10 @@ def propose(target: str, add_gauntlets: list[int] | None = None, remove_sleeves:
         setattr(new, k, float(v))
     if balance_scale is not None:
         new.balance_scale = balance_scale
-    if target == "live" and any(not s.validated for s in new.sleeves):
-        raise PermissionError("every live sleeve must have passed the gauntlet")
+    if prop_profile is not None:
+        apply_prop_profile(new, prop_profile)
+    if target != "demo" and any(not s.validated for s in new.sleeves):
+        raise PermissionError(f"every {target} sleeve must have passed the gauntlet")
     new.enabled = enabled
     new.reset_halt = cur.reset_halt + (1 if reset_halt else 0)
     new.version = cur.version + 1
@@ -214,8 +262,8 @@ def reject_open(target: str, con=None) -> int:
 
 def kill(target: str, reason: str = "", con=None) -> dict:
     """Disable trading now: QB_Host closes every QB position and stops. No approval needed."""
-    if target not in TARGETS:
-        raise ValueError(f"target must be one of {TARGETS}")
+    if target not in targets():
+        raise ValueError(f"target must be one of {targets()}")
     con = con or db.connect()
     cur = current(target, con)
     cur.enabled = False

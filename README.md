@@ -13,7 +13,7 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 | M4 | Generated / genetic strategies (building blocks → Python + MQL5) | ✅ built (first batch running) |
 | M5 | ML strategies (walk-forward sklearn → ONNX in MT5) | ✅ built (first batch running) |
 | M6 | Live readiness + VPS migration | ✅ built (no live account yet) |
-| M7 | Prop-firm rule profiles | planned |
+| M7 | Prop-firm rule profiles, challenge simulator, EA enforcement | ✅ built |
 
 ## Accounts
 - **Demo only for now.** Main terminal and tester copy are each logged into a BlackBull demo
@@ -172,6 +172,24 @@ the terminal's account type.
 **Emergency stop without Python or Claude:**
 `powershell -ExecutionPolicy Bypass -File scripts\kill_switch.ps1 live`. For a VPS, see
 [docs/VPS.md](docs/VPS.md).
+
+## Prop firms (M7)
+- `config/propfirms.yaml`: generic profiles (`two_step_standard`, `one_step_trailing`,
+  `instant_funded`). Each has a profit target, a daily loss limit with its basis (start-of-day
+  balance/equity/max), a static or trailing max drawdown, min trading days, a time limit, a
+  Friday flatten hour and a news blackout. Copy one and edit it to match a specific firm.
+- `prop_simulate(gauntlet_ids, profile)`: Monte Carlo over the strategies' real pre-holdout trade
+  days, applied trade by trade (so intraday daily-limit breaches count). Reports P(pass) vs risk
+  per trade and the risk that **maximises the chance of passing**, which is usually far below
+  growth-optimal sizing.
+- `QB_Host` enforces the rules: `prop_initial_balance` makes limits % of the initial balance,
+  plus `daily_loss_basis`, `max_dd_mode` static/trailing, a weekend flatten window, and a
+  high-impact news blackout from the MT5 economic calendar per symbol currency.
+- Prop accounts are extra targets in `settings.terminals` (usually `account_mode: demo`), set up
+  with `scripts/setup_terminal.py <name>` and enabled by the user in `account.enabled_targets`.
+  `propose_deployment(target=..., prop_profile=...)` writes the firm's limits tightened by
+  `prop_safety_buffer` (0.8), so the EA stops before the firm's own limit is hit. Only validated
+  sleeves are accepted.
 
 ## The gauntlet (gate to demo)
 Pre-screen (150 random configs; the best must reach Sharpe 0.5, or the job stops early) →

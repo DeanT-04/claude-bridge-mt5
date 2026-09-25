@@ -252,12 +252,15 @@ def portfolio_allocation(gauntlet_ids: list[int], budget_pct: float | None = Non
 def propose_deployment(add_gauntlet_ids: list[int] | None = None, remove_sleeve_ids: list[int] | None = None,
                        target: str = "demo", allow_unvalidated: bool = False, enabled: bool = True,
                        limits: dict | None = None, reset_halt: bool = False, note: str = "",
-                       balance_scale: float | None = None) -> dict:
+                       balance_scale: float | None = None, prop_profile: str | None = None) -> dict:
     """Draft a new QB_Host config. Changes NOTHING on the terminal. Returns the full config, a
     diff against the running one, and proposal_id + sha256. Show the user the diff and wait for
     their explicit approval in chat before calling apply_deployment. allow_unvalidated lets a
     sleeve that failed the gauntlet forward-test on demo only (small fixed risk).
-    balance_scale: None on demo = size as the £100 target account; 1.0 = the demo's own equity."""
+    balance_scale: None on demo = size as the £100 target account; 1.0 = the demo's own equity.
+    target: demo, live, or a prop target from settings.terminals (must be in enabled_targets).
+    prop_profile: name from prop_profiles(); writes its rules (limits tightened by
+    prop_safety_buffer) into the config for QB_Host to enforce. "" clears them."""
     from bridge import deploy
     from research import gauntlet
     scale = balance_scale
@@ -267,7 +270,7 @@ def propose_deployment(add_gauntlet_ids: list[int] | None = None, remove_sleeve_
                                                 config.settings()["account"]["currency"])
         scale = deploy.demo_balance_scale(acct, rate)
     return deploy.propose(target, add_gauntlet_ids, remove_sleeve_ids, allow_unvalidated, enabled,
-                          limits, scale, reset_halt, note)
+                          limits, scale, reset_halt, note, prop_profile=prop_profile)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
@@ -310,6 +313,34 @@ def promote_to_live(sleeve_ids: list[int], force: bool = False) -> dict:
     the user approves and apply_deployment is called."""
     from bridge import monitor
     return monitor.promote_to_live(sleeve_ids, force)
+
+
+# ------------------------------------------------------------------ prop firms (M7)
+@mcp.tool()
+def prop_profiles() -> dict:
+    """Prop-firm rule profiles from config/propfirms.yaml."""
+    from dataclasses import asdict
+    from research import propfirm
+    return {k: asdict(v) for k, v in propfirm.profiles().items()}
+
+
+@mcp.tool()
+def prop_simulate(gauntlet_ids: list[int], profile: str, years: float = 3.0) -> dict:
+    """Monte Carlo a prop challenge for these strategies (their pre-holdout trade days, applied
+    trade by trade): pass probability vs risk per trade, and the risk that maximises P(pass).
+    Figures use tuned params, so treat them as optimistic."""
+    from research import propfirm
+    con = db.connect()
+    sleeves = []
+    for gid in gauntlet_ids:
+        g = db.gauntlet(con, gid)
+        risk = (g["stages"].get("sizing_montecarlo", {}).get("risk") or 0) * 100 or 1.0
+        sleeves.append({**g, "risk_pct": risk})
+    days, active, _ = propfirm.sleeve_days(sleeves, years)
+    res = propfirm.best_risk(days, active, propfirm.profiles()[profile])
+    res.update({"trade_days": len(days), "active_share": round(active, 3),
+                "note": "risk_pct = risk per trade of the largest sleeve; others scale by their weights"})
+    return res
 
 
 @mcp.tool()

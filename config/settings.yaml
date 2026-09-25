@@ -16,6 +16,11 @@ terminals:
   live:
     install_dir: runtime\live
     portable: true
+  # Example prop target (uncomment, run scripts/setup_terminal.py prop_example, log in yourself):
+  # prop_example:
+  #   install_dir: runtime\prop_example
+  #   portable: true
+  #   account_mode: demo        # many challenge accounts are demo-mode on the firm's server
 
 tester:
   # Portable copy used exclusively for Strategy Tester runs (created by scripts/setup_tester.py).
@@ -33,6 +38,8 @@ account:
   # Demo is USD 1000; demo lot sizing is scaled so risk % mirrors the live target.
   demo_scale_to_target: true
   live_enabled: false
+  # Non-demo/live targets (e.g. prop challenges) you have logged in and allow deployment to.
+  enabled_targets: []
 
 research:
   timeframes: [M15, M30, H1]
@@ -51,6 +58,8 @@ deployment:
   promote_min_trades: 30
   promote_min_days: 28
   magic_base: 900000          # must match QB_Host InpMagicBase
+  # Prop configs tighten the firm's daily/total limits by this factor (0.8 = stop at 80%).
+  prop_safety_buffer: 0.8
 
 paths:
   registry_db: runtime\registry.sqlite

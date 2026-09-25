@@ -90,6 +90,12 @@ bool      g_enabled = false;
 string    g_account = "";
 double    g_scale = 1.0, g_max_daily = 0, g_max_dd = 0, g_max_open = 0;
 int       g_reset_halt = 0;
+// prop-firm rules (all optional; 0/"" = off)
+double    g_prop_initial = 0;          // limits become % of this initial balance
+string    g_daily_basis = "equity";    // start-of-day reference: balance | equity | max
+string    g_dd_mode = "trailing";      // trailing (from peak) | static (from prop_initial_balance)
+int       g_weekend_flat_hour = 0;     // Friday server hour to flatten; blocks entries until Monday
+int       g_news_min = 0;              // no entries within +/- N min of high-impact news
 // state
 string    g_error = "";
 datetime  g_last_status = 0;
@@ -170,6 +176,7 @@ bool LoadConfig()
    ClearSleeves();
    g_version = 0; g_enabled = false; g_account = ""; g_scale = 1.0;
    g_max_daily = 0; g_max_dd = 0; g_max_open = 0; g_reset_halt = 0; g_error = "";
+   g_prop_initial = 0; g_daily_basis = "equity"; g_dd_mode = "trailing"; g_weekend_flat_hour = 0; g_news_min = 0;
    while(!FileIsEnding(h))
    {
       string line = FileReadString(h);
@@ -186,6 +193,11 @@ bool LoadConfig()
       else if(key == "max_total_dd_pct") g_max_dd = StringToDouble(val);
       else if(key == "max_open_risk_pct") g_max_open = StringToDouble(val);
       else if(key == "reset_halt") g_reset_halt = (int)StringToInteger(val);
+      else if(key == "prop_initial_balance") g_prop_initial = StringToDouble(val);
+      else if(key == "daily_loss_basis") g_daily_basis = val;
+      else if(key == "max_dd_mode") g_dd_mode = val;
+      else if(key == "weekend_flat_hour") g_weekend_flat_hour = (int)StringToInteger(val);
+      else if(key == "news_blackout_min") g_news_min = (int)StringToInteger(val);
       else if(key == "sleeve")
       {
          CSleeve *s = new CSleeve();
@@ -290,10 +302,14 @@ double OpenRiskPct()
 // Returns true when trading may continue this tick.
 bool RiskGate()
 {
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY), bal = AccountInfoDouble(ACCOUNT_BALANCE);
    MqlDateTime now; TimeToStruct(TimeTradeServer(), now);
    double today = now.year * 1000 + now.day_of_year;
-   if(GvGet("day", 0) != today) { GvSet("day", today); GvSet("day_start", eq); GvSet("halted_today", 0); }
+   if(GvGet("day", 0) != today)
+   {
+      double sod = g_daily_basis == "balance" ? bal : (g_daily_basis == "max" ? MathMax(bal, eq) : eq);
+      GvSet("day", today); GvSet("day_start", sod); GvSet("halted_today", 0);
+   }
    double peak = MathMax(GvGet("peak", eq), eq);
    GvSet("peak", peak);
 
@@ -306,19 +322,57 @@ bool RiskGate()
    if(GvGet("halted_today", 0) > 0) return false;
 
    double day_start = GvGet("day_start", eq);
-   if(g_max_daily > 0 && eq <= day_start * (1 - g_max_daily / 100.0))
+   // Prop rules measure limits as % of the initial balance; otherwise % of the reference itself.
+   double daily_base = g_prop_initial > 0 ? g_prop_initial : day_start;
+   if(g_max_daily > 0 && eq <= day_start - daily_base * g_max_daily / 100.0)
    {
       GvSet("halted_today", 1);
       CloseAll(StringFormat("daily loss limit %.1f%% hit", g_max_daily));
       return false;
    }
-   if(g_max_dd > 0 && eq <= peak * (1 - g_max_dd / 100.0))
+   double floor;
+   if(g_dd_mode == "static" && g_prop_initial > 0) floor = g_prop_initial * (1 - g_max_dd / 100.0);
+   else floor = peak - (g_prop_initial > 0 ? g_prop_initial : peak) * g_max_dd / 100.0;
+   if(g_max_dd > 0 && eq <= floor)
    {
       GvSet("halted", 1);
-      CloseAll(StringFormat("total drawdown limit %.1f%% hit; halted until reset_halt", g_max_dd));
+      CloseAll(StringFormat("total drawdown limit %.1f%% (%s) hit; halted until reset_halt", g_max_dd, g_dd_mode));
+      return false;
+   }
+   if(g_weekend_flat_hour > 0 && WeekendWindow(now))
+   {
+      CloseAll("");                         // no positions over the weekend
       return false;
    }
    return true;
+}
+
+// From Friday weekend_flat_hour until Monday 00:00 server time.
+bool WeekendWindow(const MqlDateTime &now)
+{
+   return (now.day_of_week == 5 && now.hour >= g_weekend_flat_hour) || now.day_of_week == 6 || now.day_of_week == 0;
+}
+
+// High-impact calendar event for either of the symbol's currencies within +/- g_news_min minutes.
+bool NewsNear(const string sym)
+{
+   if(g_news_min <= 0 || MQLInfoInteger(MQL_TESTER)) return false;   // calendar unavailable in tester
+   datetime t = TimeTradeServer();
+   string ccys[2];
+   ccys[0] = SymbolInfoString(sym, SYMBOL_CURRENCY_BASE);
+   ccys[1] = SymbolInfoString(sym, SYMBOL_CURRENCY_PROFIT);
+   for(int c = 0; c < 2; c++)
+   {
+      if(ccys[c] == "" || (c == 1 && ccys[1] == ccys[0])) continue;
+      MqlCalendarValue vals[];
+      if(CalendarValueHistory(vals, t - g_news_min * 60, t + g_news_min * 60, NULL, ccys[c]) <= 0) continue;
+      for(int i = 0; i < ArraySize(vals); i++)
+      {
+         MqlCalendarEvent ev;
+         if(CalendarEventById(vals[i].event_id, ev) && ev.importance == CALENDAR_IMPORTANCE_HIGH) return true;
+      }
+   }
+   return false;
 }
 
 bool InSession(CSleeve *s, datetime t)
@@ -361,6 +415,7 @@ void DecideSleeve(CSleeve *s, const datetime bar, const bool may_enter)
    double open_risk = OpenRiskPct() - (s.pend.close_ticket != 0 ? s.risk : 0);
    if(g_max_open > 0 && open_risk + s.risk > g_max_open + 1e-9) return;
    if(s.max_spread > 0 && SymbolInfoInteger(s.sym, SYMBOL_SPREAD) > s.max_spread) return;
+   if(NewsNear(s.sym)) return;
 
    double atr[1];
    if(CopyBuffer(s.atr, 0, 1, 1, atr) != 1 || atr[0] <= 0) return;
