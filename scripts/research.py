@@ -8,6 +8,9 @@ python scripts/research.py run [--procs 3] [--no-mt5]            # work the queu
 python scripts/research.py status | survivors | confirm
 python scripts/research.py gauntlet donchian XAUUSD H1 [--mt5]  # one gauntlet, printed
 python scripts/research.py programs                               # prop programs + sizes/fees
+python scripts/research.py leaderboard [--program ftmo_2step] [--size 50000] [--limit 30]
+python scripts/research.py combine [--programs ftmo_2step,...] [--max-sleeves 5]
+python scripts/research.py calendar                               # refresh the news calendar
 
 --symbols takes researchable, core, or a comma list (EURUSD,XAUUSD).
 """
@@ -49,7 +52,13 @@ def main():
     g = sub.add_parser("gauntlet")
     g.add_argument("family"); g.add_argument("symbol"); g.add_argument("timeframe")
     g.add_argument("--mt5", action="store_true", help="confirm the finalist in the MT5 tester")
-    for name in ("status", "survivors", "confirm", "programs"):
+    lb = sub.add_parser("leaderboard")
+    lb.add_argument("--program"); lb.add_argument("--size", type=float)
+    lb.add_argument("--min-pass", type=float, default=0.0); lb.add_argument("--limit", type=int, default=30)
+    cb = sub.add_parser("combine")
+    cb.add_argument("--programs"); cb.add_argument("--ids")
+    cb.add_argument("--max-sleeves", type=int, default=5); cb.add_argument("--max-corr", type=float, default=0.5)
+    for name in ("status", "survivors", "confirm", "programs", "calendar"):
         sub.add_parser(name)
     a = ap.parse_args()
 
@@ -94,6 +103,22 @@ def main():
         print(json.dumps({"id": res["id"], "verdict": res["verdict"], "params": res["params"],
                           "stages": {k: v.get("pass") for k, v in res["stages"].items()},
                           "seconds": round(time.time() - t0, 1), "file": str(out)}, indent=2))
+    elif a.cmd == "leaderboard":
+        from research import challenge
+        rows = challenge.leaderboard(a.program, a.size, a.min_pass, limit=a.limit)
+        for r in rows:
+            cpp = f"{r['fee_currency']} {r['cost_per_pass']:,.0f}" if r["cost_per_pass"] else "fee n/a"
+            print(f"{r['pass_prob']:5.2f} lift {r['lift'] or 0:+.2f}  {r['program']:26} {r['size'] / 1000:>5g}K "
+                  f"risk {r['risk_pct']:.2f}%  {r['median_days'] or 0:>4.0f}d  {cpp:>12}  {r['kind'][:4]} {r['id']} {r['name']}")
+        if not rows:
+            print("no survivors with a prop stage yet")
+    elif a.cmd == "combine":
+        from research import challenge
+        challenge.combine(a.programs.split(",") if a.programs else None,
+                          [int(x) for x in a.ids.split(",")] if a.ids else None, a.max_sleeves, a.max_corr)
+    elif a.cmd == "calendar":
+        from research import calendar
+        print(json.dumps(calendar.export(), indent=1))
     elif a.cmd == "programs":
         from research import propfirm
         for k, p in propfirm.profiles().items():

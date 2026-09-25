@@ -90,3 +90,35 @@ def test_donchian_channel_matches_naive():
         if not np.isfinite(atr[i - 1]):
             exp = 0
         assert d[i] == exp, i
+
+
+# ---- prop execution rules ---------------------------------------------------------------
+FRI = 86400 + 7 * 86400 * 2800             # a Friday 00:00 (1970-01-02 was a Friday; + whole weeks)
+
+
+def test_weekend_masks_block_window_and_flatten_last_bar():
+    from datetime import datetime, timezone
+    from research.engine import weekend_masks
+    fri = FRI
+    assert datetime.fromtimestamp(fri, timezone.utc).weekday() == 4
+    t = np.array([fri + h * 3600 for h in (19, 20, 21, 22, 23)] + [fri + 3 * 86400])  # ... Monday 00:00
+    blocked, flat = weekend_masks(t, 22)
+    assert blocked.tolist() == [False, False, False, True, True, False]
+    assert flat.tolist() == [False, False, True, False, False, False]
+    # market closing before the cutoff: the last Friday bar still flattens
+    t2 = np.array([fri + 19 * 3600, fri + 20 * 3600, fri + 3 * 86400])
+    b2, f2 = weekend_masks(t2, 22)
+    assert f2.tolist() == [False, True, False] and not b2.any()
+
+
+def test_flat_at_closes_position_at_bar_close():
+    b = mk([(100, 100, 100, 100), (100, 101, 99.5, 100.5), (100.5, 101, 100, 100.8), (100.8, 110, 100, 109)])
+    flat = np.array([False, False, True, False])
+    tr = simulate(b, *sig(4, 1, 1, 2.0, 5.0), max_bars=10, costs=C0, flat_at=flat)
+    assert len(tr) == 1 and tr[0].reason == "flat" and tr[0].exit == 100.8 and tr[0].exit_i == 2
+
+
+def test_blocked_bar_skips_entry():
+    b = mk([(100, 100, 100, 100), (100, 103, 99.5, 102), (102, 107, 101, 106)])
+    blocked = np.array([False, True, False])
+    assert simulate(b, *sig(3, 1, 1, 2.0, 5.0), max_bars=10, costs=C0, blocked=blocked) == []

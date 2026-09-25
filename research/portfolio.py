@@ -1,7 +1,8 @@
 """Portfolio construction across sleeves: correlation, risk allocation, combined Monte Carlo.
 
-Each sleeve is a (family, symbol, timeframe, params) run on the fast engine over a common
-recent window; results are combined on calendar days in R units, then risk-weighted.
+Sleeves are combined on calendar days in R units, then risk-weighted. The R series are each
+gauntlet's walk-forward OOS trades over the sleeves' common OOS period; only gauntlets from
+before those were stored fall back to re-running the tuned params (in-sample, optimistic).
 """
 from __future__ import annotations
 
@@ -22,8 +23,25 @@ def _month_back(ts: int, months: int) -> int:
     return _month_ts(ts, -months)
 
 
+def oos_matrix(sleeves: list[dict]) -> tuple[np.ndarray, np.ndarray] | None:
+    """(days, R matrix) from the sleeves' stored walk-forward OOS trades over their common OOS
+    period, or None if any sleeve lacks them or the periods don't overlap."""
+    from registry import db
+    from .challenge import daily_matrix, load_sleeves, overlap
+    if not all("id" in s for s in sleeves):
+        return None
+    oos = load_sleeves(db.connect(), [s["id"] for s in sleeves])
+    if len(oos) != len(sleeves):
+        return None
+    lo, hi = overlap(oos)
+    if hi - lo < 30 * DAY:
+        return None
+    return np.arange(lo // DAY, hi // DAY + 1), daily_matrix(oos, lo, hi)
+
+
 def daily_r_matrix(sleeves: list[dict], years: float = 3.0) -> tuple[np.ndarray, np.ndarray]:
-    """(days, R matrix [days x sleeves]) over the window every sleeve's data covers."""
+    """(days, R matrix [days x sleeves]) from tuned params over the window every sleeve's data
+    covers (fallback when OOS trades aren't stored)."""
     series, lo, hi = [], -math.inf, math.inf
     for s in sleeves:
         fam = get_family(s["family"])
@@ -70,7 +88,8 @@ def allocate(mat: np.ndarray, max_risks: np.ndarray, budget: float, dd95_max: fl
 
 def build(sleeves: list[dict], budget_pct: float, dd95_max: float, years: float = 3.0) -> dict:
     """sleeves: dicts with family/symbol/timeframe/params/risk_pct. Returns allocation + stats."""
-    days, mat = daily_r_matrix(sleeves, years)
+    oos = oos_matrix(sleeves)
+    days, mat = oos if oos else daily_r_matrix(sleeves, years)
     corr = np.corrcoef(mat.T) if len(sleeves) > 1 else np.ones((1, 1))
     caps = np.array([s.get("risk_pct", budget_pct) / 100 for s in sleeves])
     res = allocate(mat, caps, budget_pct / 100, dd95_max)
@@ -81,6 +100,7 @@ def build(sleeves: list[dict], budget_pct: float, dd95_max: float, years: float 
         per.append({"sleeve": f"{s['family']} {s['symbol']} {s['timeframe']}",
                     "risk_pct": round(float(res["risks"][j]) * 100, 4),
                     "sharpe": float(col.mean() / sd * math.sqrt(365.25)) if sd > 0 else 0.0})
-    return {"days": len(days), "sleeves": per, "correlation": np.round(corr, 3).tolist(),
+    return {"days": len(days), "source": "walk-forward OOS" if oos else "tuned params (in-sample)",
+            "sleeves": per, "correlation": np.round(corr, 3).tolist(),
             "portfolio_sharpe": res["portfolio_sharpe"], "dd95": res["dd95"],
             "annual_return": res["annual_return"]}

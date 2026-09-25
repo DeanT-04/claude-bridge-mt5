@@ -10,7 +10,7 @@ from . import config
 
 SRC = config.ROOT / "mql5"
 # Only these subtrees are ever written into a terminal, so the user's other EAs stay untouched.
-OWNED = [Path("Include/QB"), Path("Experts/QB")]
+OWNED = [Path("Include/QB"), Path("Experts/QB"), Path("Scripts/QB")]
 
 
 def mql5_root(install_dir: Path | None = None) -> Path:
@@ -27,10 +27,10 @@ def sync(dest_mql5: Path | None = None) -> Path:
     return dest
 
 
-def compile_expert(name: str, dest_mql5: Path | None = None) -> dict:
-    """Compile Experts/QB/<name>.mq5. Returns {ok, errors, warnings, log, ex5}."""
+def compile_expert(name: str, dest_mql5: Path | None = None, kind: str = "Experts") -> dict:
+    """Compile <kind>/QB/<name>.mq5 (kind: Experts | Scripts). Returns {ok, errors, warnings, log, ex5}."""
     dest = sync(dest_mql5)
-    src = dest / "Experts" / "QB" / f"{name}.mq5"
+    src = dest / kind / "QB" / f"{name}.mq5"
     if not src.exists():
         raise FileNotFoundError(src)
     log = src.with_suffix(".log")

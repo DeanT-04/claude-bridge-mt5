@@ -127,3 +127,34 @@ def save_ml_spec(con, family: str, spec: dict) -> None:
 def get_ml_spec(con, family: str) -> dict | None:
     r = con.execute("SELECT spec FROM ml_models WHERE id=?", (family,)).fetchone()
     return None if r is None else json.loads(r["spec"])
+
+
+def save_oos_trades(con, gauntlet_id: int, variant: str, span: tuple[int, int], trades) -> None:
+    rows = [[int(t.entry_time), int(t.exit_time), round(float(t.r), 5)] for t in trades]
+    con.execute("INSERT OR REPLACE INTO oos_trades(gauntlet_id, variant, span_start, span_end, trades) "
+                "VALUES (?,?,?,?,?)", (gauntlet_id, variant, int(span[0]), int(span[1]), json.dumps(rows)))
+    con.commit()
+
+
+def oos_trades(con, gauntlet_id: int, variant: str = "base") -> dict | None:
+    """{'span': (start, end), 'trades': [[entry_time, exit_time, r], ...]} or None."""
+    r = con.execute("SELECT span_start, span_end, trades FROM oos_trades WHERE gauntlet_id=? AND variant=?",
+                    (gauntlet_id, variant)).fetchone()
+    return None if r is None else {"span": (r["span_start"], r["span_end"]), "trades": json.loads(r["trades"])}
+
+
+def save_prop_portfolio(con, program: str, members: list[dict], pass_prob: float, result: dict) -> int:
+    cur = con.execute("INSERT INTO prop_portfolios(program, members, pass_prob, result) VALUES (?,?,?,?)",
+                      (program, json.dumps(members), pass_prob, json.dumps(result, default=_js)))
+    con.commit()
+    return cur.lastrowid
+
+
+def prop_portfolios(con, program: str | None = None) -> list[dict]:
+    q = "SELECT * FROM prop_portfolios" + (" WHERE program=?" if program else "") + " ORDER BY id"
+    out = []
+    for r in con.execute(q, (program,) if program else ()):
+        d = dict(r)
+        d["members"], d["result"] = json.loads(d["members"]), json.loads(d["result"])
+        out.append(d)
+    return out

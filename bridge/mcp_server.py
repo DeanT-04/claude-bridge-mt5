@@ -329,13 +329,15 @@ def _sleeves_for(gauntlet_ids: list[int]) -> list[dict]:
 
 @mcp.tool()
 def prop_simulate(gauntlet_ids: list[int], profile: str, size: float | None = None, years: float = 3.0) -> dict:
-    """Monte Carlo one prop program for these strategies (pre-holdout trade days, applied trade
-    by trade, every phase): P(pass) vs risk per trade, the P(pass)-maximising risk, and the fee
-    and expected cost per pass for the chosen account size. Tuned params: treat as optimistic."""
+    """Monte Carlo one prop program for these strategies (their walk-forward OOS trades under the
+    program's weekend/news rules, applied trade by trade, every phase): P(pass) vs risk per trade,
+    the P(pass)-maximising risk, lift over the edge-removed baseline, and the fee and expected
+    cost per pass for the chosen account size."""
     from research import propfirm
-    days, active, _ = propfirm.sleeve_days(_sleeves_for(gauntlet_ids), years)
-    res = propfirm.best_risk(days, active, propfirm.profiles()[profile], size)
-    res.update({"trade_days": len(days), "active_share": round(active, 3),
+    prof = propfirm.profiles()[profile]
+    days, active, _, source = propfirm.sleeve_days(_sleeves_for(gauntlet_ids), years, propfirm.variant(prof))
+    res = propfirm.evaluate(days, active, prof, runs=2000, size=size)
+    res.update({"trade_days": len(days), "active_share": round(active, 3), "source": source,
                 "note": "risk_pct = risk per trade of the largest sleeve; others scale by their weights"})
     return res
 
@@ -343,10 +345,45 @@ def prop_simulate(gauntlet_ids: list[int], profile: str, size: float | None = No
 @mcp.tool()
 def prop_rank(gauntlet_ids: list[int], years: float = 3.0) -> list[dict]:
     """Rank EVERY modelled prop program for these strategies by P(pass) at its best risk, with
-    each program's sizes/fees and cost per pass (at the research size)."""
+    lift over the edge-removed baseline, fee and cost per pass (at the research size)."""
     from research import propfirm
-    days, active, _ = propfirm.sleeve_days(_sleeves_for(gauntlet_ids), years)
-    return propfirm.rank_programs(days, active, runs=1000)
+    sleeves = _sleeves_for(gauntlet_ids)
+    cache, out = {}, []
+    for name, prof in propfirm.profiles().items():
+        v = propfirm.variant(prof)
+        if v not in cache:
+            cache[v] = propfirm.sleeve_days(sleeves, years, v)
+        days, active, _, source = cache[v]
+        out.append({**propfirm.evaluate(days, active, prof, runs=1000), "source": source})
+    return sorted(out, key=lambda r: r["best"]["pass_prob"], reverse=True)
+
+
+@mcp.tool()
+def prop_leaderboard(program: str | None = None, size: float | None = None, min_pass_prob: float = 0.0,
+                     include_portfolios: bool = True, limit: int = 50) -> list[dict]:
+    """Challenge leaderboard: every surviving strategy (and combined portfolio) x program x
+    account size, best P(pass) first, with lift over luck, the P(pass)-maximising risk, median
+    days, fee and expected cost per pass. Filter by program key and/or size."""
+    from research import challenge
+    return challenge.leaderboard(program, size, min_pass_prob, portfolios=include_portfolios, limit=limit)
+
+
+@mcp.tool()
+def prop_combine(programs: list[str] | None = None, gauntlet_ids: list[int] | None = None,
+                 max_sleeves: int = 5, max_corr: float = 0.5) -> list[dict]:
+    """Build challenge portfolios: per program, greedily combine uncorrelated survivors (or the
+    given gauntlets) while P(pass) improves, on their walk-forward OOS trades. Stored and shown
+    in prop_leaderboard. Can take a few minutes with many survivors."""
+    from research import challenge
+    return challenge.combine(programs, gauntlet_ids, max_sleeves, max_corr, progress=lambda *_: None)
+
+
+@mcp.tool()
+def export_calendar() -> dict:
+    """Refresh the high-impact news calendar history (used to backtest news blackouts) by running
+    QB_ExportCalendar on the tester copy. Takes up to a minute; don't run during MT5 tests."""
+    from research import calendar
+    return calendar.export()
 
 
 @mcp.tool()

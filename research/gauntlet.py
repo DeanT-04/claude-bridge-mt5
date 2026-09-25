@@ -1,4 +1,4 @@
-"""The validation gauntlet: walk-forward -> robustness -> benchmarks -> sizing -> holdout -> MT5.
+"""The validation gauntlet: walk-forward -> robustness -> benchmarks -> sizing -> prop gate -> holdout -> MT5.
 
 Research runs on the fast Python engine; MT5 confirms the finalist (parity + cost stress).
 Every configuration evaluated is logged as a trial so the Deflated Sharpe hurdle is honest.
@@ -142,6 +142,7 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
 
     oos_trades: list[Trade] = []
     chosen: list = []
+    picked: list[tuple[Window, object]] = []      # (window, params) actually traded OOS
     is_sharpes, oos_sharpes = [], []
     for wi, w in enumerate(windows):
         gi = int(np.argmax(is_scores[:, wi]))
@@ -150,6 +151,7 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
             continue
         best = grid[gi]
         chosen.append(best)
+        picked.append((w, best))
         tr = bt(best, w.is_end, w.oos_end)
         oos_trades += tr
         is_sharpes.append(best_s)
@@ -203,7 +205,7 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
     cs = g["cost_stress"]
     stressed = costs_for(spec, cs["spread_mult"], cs["extra_slippage_points"])
     st_trades = []
-    for w, p in zip(windows, chosen):
+    for w, p in picked:
         st_trades += bt(p, w.is_end, w.oos_end, stressed)
     sm = stats.metrics(st_trades, span_days=oos_span)
     stages["cost_stress"] = {"pass": sm["profit_factor"] >= cs["min_profit_factor"], "stressed": sm}
@@ -220,22 +222,27 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
                             "random_entry": rnd, "buy_hold_sharpe": bh, "strategy_sharpe": m["sharpe"]}
 
     core = ["walk_forward", "neighbourhood", "deflated_sharpe", "sizing_montecarlo",
-            "cost_stress", "benchmarks"]
+            "cost_stress", "benchmarks"]      # then the prop gate (7), before the holdout is spent
     all_pass = all(stages[s]["pass"] for s in core)
 
-    # ---- 7. prop challenges (informational for now; gating comes in plan P1) ------------
+    # ---- 7. prop challenges (gate) -------------------------------------------------------
     # Uses the walk-forward OOS trades, never the tuned final params, so it isn't in-sample.
+    # Firms with weekend/news rules get the OOS trades regenerated under those rules.
+    oos = {"base": oos_trades}
+    span = (int(times[windows[0].is_end]), int(times[windows[-1].oos_end - 1]))
     if all_pass:
         from . import propfirm
-        days = propfirm.trade_days(oos_trades)
-        active = min(len(days) / max(oos_span * 5 / 7, 1), 1.0)
-        ranked = propfirm.rank_programs(days, active, runs=800)
-        stages["prop"] = {"pass": True, "informational": True,
-                          "programs": [{"profile": r["profile"], "pass_prob": r["best"]["pass_prob"],
-                                        "risk_pct": r["best"]["risk_pct"],
-                                        "median_days": r["best"]["median_days_to_pass"],
-                                        "cost_per_pass": r["cost_per_pass"],
-                                        "fee_currency": r["fee_currency"], "size": r["size"]} for r in ranked]}
+        for prof in propfirm.profiles().values():
+            v = propfirm.variant(prof)
+            if v not in oos:
+                blocked, flat = execution_rules(bars, symbol, spec, prof.weekend_flat_hour, prof.news_blackout_min)
+                oos[v] = []
+                for w, p in picked:
+                    d, sl, tp = sigs(p)
+                    oos[v] += simulate(bars, d, sl, tp, p.InpMaxBars, costs, w.is_end, w.oos_end,
+                                       blocked=blocked, flat_at=flat)
+        stages["prop"] = prop_gate(oos, oos_span, g["prop"])
+        all_pass = stages["prop"]["pass"]
 
     # ---- 8. holdout (once per candidate, only if everything else passed) ---------------
     cand = db.candidate_hash(family, symbol, timeframe, final.dict())
@@ -265,10 +272,51 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
         verdict = "pending_mt5"
     else:
         verdict = "pass" if stages["mt5"]["pass"] else "fail"
-    return _finish(con, family, symbol, timeframe, final.dict(), verdict, stages)
+    return _finish(con, family, symbol, timeframe, final.dict(), verdict, stages, oos, span)
 
 
-def _finish(con, family, symbol, timeframe, params, verdict, stages) -> dict:
+def execution_rules(bars, symbol: str, spec: dict, flat_hour: int, news_min: int):
+    """(blocked, flat_at) bar masks for a prop firm's weekend and news rules, as QB_Host applies them."""
+    from . import calendar
+    from .engine import weekend_masks
+    blocked = np.zeros(len(bars), dtype=bool)
+    flat = None
+    if flat_hour:
+        blocked, flat = weekend_masks(bars["time"], flat_hour)
+    if news_min:
+        if not calendar.available(bars["time"]):
+            raise RuntimeError("news calendar missing or stale: run `python scripts/research.py calendar`")
+        blocked = blocked | calendar.news_mask(bars["time"], symbol, news_min, spec)
+    return blocked, flat
+
+
+def prop_gate(oos: dict[str, list[Trade]], span_days: float, cfg: dict) -> dict:
+    """Evaluate every program on its variant's OOS trades; pass if any program clears both
+    min_pass_prob and min_lift."""
+    from . import propfirm
+    progs = propfirm.profiles()
+    names = list(progs) if cfg.get("programs", "all") == "all" else cfg["programs"]
+    rows = []
+    for n in names:
+        prof = progs[n]
+        tr = oos[propfirm.variant(prof)]
+        days = propfirm.trade_days(tr)
+        active = min(len(days) / max(span_days * 5 / 7, 1), 1.0)
+        e = propfirm.evaluate(days, active, prof, runs=cfg["runs"])
+        ok = e["best"]["pass_prob"] >= cfg["min_pass_prob"] and e["lift"] >= cfg["min_lift"]
+        rows.append({"profile": n, "pass": ok, "pass_prob": e["best"]["pass_prob"], "lift": e["lift"],
+                     "baseline_pass_prob": e["baseline_pass_prob"], "risk_pct": e["best"]["risk_pct"],
+                     "median_days": e["best"]["median_days_to_pass"],
+                     "fail_breakdown": e["best"]["fail_breakdown"], "trades": len(tr),
+                     "variant": propfirm.variant(prof)})
+    rows.sort(key=lambda r: (r["pass"], r["pass_prob"]), reverse=True)
+    return {"pass": any(r["pass"] for r in rows), "min_pass_prob": cfg["min_pass_prob"],
+            "min_lift": cfg["min_lift"], "programs": rows}
+
+
+def _finish(con, family, symbol, timeframe, params, verdict, stages, oos=None, span=None) -> dict:
     gid = db.log_gauntlet(con, family, symbol, timeframe, params, verdict, stages)
+    for v, tr in (oos or {}).items():
+        db.save_oos_trades(con, gid, v, span, tr)
     return {"id": gid, "family": family, "symbol": symbol, "timeframe": timeframe,
             "params": params, "verdict": verdict, "stages": stages}

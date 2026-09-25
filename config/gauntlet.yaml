@@ -26,3 +26,11 @@ sizing:
   kelly_fraction: 0.25
   max_risk_pct: 5.0
   min_risk_pct: 0.25
+prop:
+  # Gate on the walk-forward OOS trades (each program's trades regenerated under its weekend/news
+  # rules): at least one program must reach min_pass_prob at its P(pass)-maximising risk AND beat
+  # the same trades with their edge removed (de-meaned R; ~0.2-0.33 P(pass) by luck) by min_lift.
+  min_pass_prob: 0.6
+  min_lift: 0.2
+  programs: all               # or a list of program keys from config/propfirms.yaml
+  runs: 800

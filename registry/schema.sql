@@ -93,3 +93,27 @@ CREATE TABLE IF NOT EXISTS ml_models (
     spec        TEXT NOT NULL,      -- JSON of research.ml.MLSpec
     created     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Walk-forward out-of-sample trades of a gauntlet (P1): what prop ranking, the leaderboard and
+-- the challenge-portfolio combiner work from, instead of re-running tuned params. One row per
+-- execution variant: 'base', or a prop firm's rules e.g. 'wf22_nb5' (Friday 22:00 flat, 5-min
+-- news blackout). trades = JSON [[entry_time, exit_time, r], ...]; span = the OOS period.
+CREATE TABLE IF NOT EXISTS oos_trades (
+    gauntlet_id INTEGER NOT NULL,
+    variant     TEXT NOT NULL,
+    span_start  INTEGER NOT NULL,
+    span_end    INTEGER NOT NULL,
+    trades      TEXT NOT NULL,
+    PRIMARY KEY (gauntlet_id, variant)
+);
+
+-- Challenge portfolios found by research.challenge.combine: sleeves weighted relative to the
+-- largest (risk_pct is that sleeve's risk per trade), ranked by P(pass) for one program.
+CREATE TABLE IF NOT EXISTS prop_portfolios (
+    id          INTEGER PRIMARY KEY,
+    program     TEXT NOT NULL,
+    members     TEXT NOT NULL,      -- JSON [{gauntlet_id, weight}]
+    pass_prob   REAL,
+    result      TEXT NOT NULL,      -- JSON: best-risk result, lift, correlation, overlap
+    created     TEXT NOT NULL DEFAULT (datetime('now'))
+);

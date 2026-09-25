@@ -35,7 +35,8 @@ Funded Trader (2.9★).
 Claude ──MCP──> bridge (Python)
   ├─ data/specs ─────────────> BlackBull terminal (research data, demo forward tests)
   ├─ Strategy Tester ────────> portable tester copy (runtime/tester)
-  ├─ research: universe → families / genetic / ML → gauntlet → prop ranking → MT5 confirm
+  ├─ research: universe → families / genetic / ML → gauntlet (prop gate) → MT5 confirm
+  ├─ challenge selection: leaderboard, challenge-portfolio combiner (walk-forward OOS trades)
   ├─ registry (SQLite): trials, gauntlets, genomes, ML specs, jobs, deployments
   └─ deployment: portfolio_<target>.cfg ──> QB_Host EA in each account's own terminal
 ```
@@ -44,9 +45,11 @@ Claude ──MCP──> bridge (Python)
 - `bridge/`: MT5 client, compiler, Strategy Tester runner, deployment (`deploy.py`), forward-test
   monitoring and promotion (`monitor.py`), prop preflight, MCP server
 - `research/`: execution engine, MT5-exact indicators, strategy families (`strategies/`), gauntlet,
-  genetic search, ML (`ml.py`), prop simulator (`propfirm.py`), portfolio, universe, job queue
-- `mql5/`: `Include/QB` (signals, risk, execution-with-retry, trade logger, tester score) and
-  `Experts/QB` (`QB_Rules` runs any strategy in the tester; `QB_Host` trades a portfolio live)
+  genetic search, ML (`ml.py`), prop simulator (`propfirm.py`), leaderboard and combiner
+  (`challenge.py`), news calendar (`calendar.py`), portfolio, universe, job queue
+- `mql5/`: `Include/QB` (signals, risk, execution-with-retry, trade logger, tester score),
+  `Experts/QB` (`QB_Rules` runs any strategy in the tester; `QB_Host` trades a portfolio live) and
+  `Scripts/QB` (`QB_ExportCalendar` dumps the news calendar history)
 - `registry/`: SQLite schema and API
 - `config/`: `settings.yaml` (paths, account size, terminals), `gauntlet.yaml` (thresholds),
   `propfirms.yaml` (programs)
@@ -59,6 +62,7 @@ pip install -r requirements.txt
 python scripts/setup_terminal.py tester        # portable Strategy Tester copy
 runtime\tester\terminal64.exe /portable        # once: log into a BlackBull demo (save password)
 python scripts/research.py scan                # symbol universe
+python scripts/research.py calendar            # news calendar history (for news-blackout backtests)
 ```
 
 ## Research
@@ -69,6 +73,8 @@ python scripts/research.py ml --symbols core --tf H1 --models logreg,gbm        
 python scripts/research.py run --procs 3        # parallel gauntlets, then MT5 confirmation
 python scripts/research.py status | survivors
 python scripts/research.py gauntlet keltner SPX500 H1 [--mt5]
+python scripts/research.py leaderboard [--program ftmo_2step] [--size 50000]
+python scripts/research.py combine [--programs ftmo_2step] [--max-sleeves 5]   # challenge portfolios
 python scripts/parity_check.py XAUUSD H1 2024-01-01 2024-07-01 [families]
 ```
 `--symbols`: `researchable` (61 symbols: cost ≤ 15% of H1 ATR, ≥ 3 years of history), `core`
@@ -90,8 +96,11 @@ python scripts/parity_check.py XAUUSD H1 2024-01-01 2024-07-01 [families]
 5. Sizing: fractional Kelly with a Monte Carlo drawdown check.
 6. Cost stress: 1.5× spread plus slippage.
 7. Benchmarks: beat random entries and buy-and-hold.
-8. **Prop ranking:** every program is simulated on the walk-forward out-of-sample trades, with the
-   P(pass)-maximising risk. Informational for now; it becomes a gate in P1.
+8. **Prop gate:** every program is simulated on the walk-forward out-of-sample trades at its
+   P(pass)-maximising risk. Firms with weekend or news rules get the OOS trades regenerated under
+   those rules first. At least one program must reach P(pass) ≥ 0.6 **and** beat the same trades
+   with their edge removed (de-meaned R) by ≥ 0.2. Luck alone passes 20–33% of challenges. The
+   OOS trades are stored per rule variant (`oos_trades` table) for the leaderboard and combiner.
 9. One-shot 12-month holdout.
 10. MT5 parity and cost stress in the real Strategy Tester.
 
@@ -104,8 +113,23 @@ every phase, and models:
 - minimum trading days and minimum profitable days
 - the best-day rule
 - time limits
+- weekend flattening and news blackouts, in the execution engine (the trades themselves change)
 
-MCP: `prop_profiles`, `prop_simulate(ids, program, size)`, `prop_rank(ids)`.
+It is vectorised over runs × risk levels, and every risk level sees the same bootstrapped days.
+The weekend rule mirrors `QB_Host`: no entries from Friday's flat hour until Monday, and a position
+is closed at the close of the last bar before the cutoff. The news rule blocks entries within ±N
+minutes of a high-impact event for the symbol's base or profit currency. Its calendar history
+comes from `QB_ExportCalendar` (Common\Files\QB\calendar_high.csv, server time).
+
+**Challenge selection** (`research/challenge.py`):
+- **Leaderboard:** each strategy or portfolio × program × account size, with P(pass), lift over
+  luck, best risk, median days, fee and cost per pass.
+- **Combiner:** for each program, start from the best survivor, then greedily add the sleeve
+  that raises P(pass) most. Candidates whose daily OOS R correlates above 0.5 with a chosen
+  sleeve are skipped. Weights are inverse-volatility, and risk is capped so all sleeves open at
+  once stay within `max_open_risk_pct`.
+- `portfolio_allocation`, `prop_simulate` and `prop_rank` also use the stored OOS trades. They
+  fall back to the tuned params only for gauntlets from before P1.
 
 ## Running a challenge
 Each prop account gets its **own portable terminal** (`terminals.<name>` in `settings.yaml` with
@@ -132,20 +156,22 @@ Panic stop without Python or Claude:
 Only gauntlet-validated sleeves may go to a prop account; unvalidated sleeves are demo-only.
 
 ## MCP server
-`.mcp.json` → `python -m bridge.mcp_server`. 29 tools:
+`.mcp.json` → `python -m bridge.mcp_server`. 32 tools:
 - **data:** `account_info`, `list_symbols`, `symbol_spec`, `get_bars`, `universe`, `scan_universe`
 - **tester:** `compile_expert`, `run_backtest`, `run_optimization`
 - **research:** `run_gauntlet`, `enqueue_research`, `enqueue_ml`, `start_research`,
   `research_status`, `research_survivors`, `list_gauntlets`, `get_gauntlet`
-- **prop:** `prop_profiles`, `prop_simulate`, `prop_rank`, `prop_preflight`
+- **prop:** `prop_profiles`, `prop_simulate`, `prop_rank`, `prop_leaderboard`, `prop_combine`,
+  `export_calendar`, `prop_preflight`
 - **deployment:** `install_host`, `portfolio_allocation`, `propose_deployment`, `apply_deployment`,
   `kill_switch`, `deployment_status`, `forward_test_report`, `promote`
 
 No tool places orders directly.
 
 ## Tests
-`python -m pytest`: 60 tests (engine, indicators, families, genetic operators, stats, tester
-ini/parsing, deployment, prop simulator, queue).
+`python -m pytest`: 72 tests (engine and prop execution rules, indicators, families, genetic
+operators, stats, tester ini/parsing, deployment, prop simulator, gate, leaderboard, combiner,
+calendar, queue).
 
 ## Findings and gotchas
 - **History understates spreads.** BTCUSD records a spread of 0 on 57% of H1 bars; XAUUSD history
@@ -161,6 +187,11 @@ ini/parsing, deployment, prop simulator, queue).
   covers only the last 3 years.
 - **First research batch (574 rule-family gauntlets on H1/M30): 0 passes.** The near-misses were
   trend-following on alt-coins, SPX500 and USDJPY. None survived the multiple-testing correction.
-- **In-sample optimism.** Tuned-parameter backtests (`prop_simulate`, `portfolio_allocation`) look
-  much better than walk-forward OOS. Trust the gauntlet's `prop` stage, which uses OOS trades.
+- **In-sample optimism.** Tuned-parameter backtests look much better than walk-forward OOS. Since
+  P1, prop and portfolio tools use the stored OOS trades.
+- **P(pass) without edge.** A zero-edge strategy at its best risk passes 20–33% of these
+  challenges. That is why the gate also requires lift over the de-meaned baseline.
+- **Weekend flat vs early market close.** When a market closes before the flat hour, QB_Host gets
+  no tick inside the window and holds over the weekend. The engine flattens at the last bar's
+  close, so P4 must make the host do the same.
 - **Built-in MCP.** MT5 build 6182 runs its own MCP server (127.0.0.1:22345/22346), not yet explored.
