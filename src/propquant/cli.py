@@ -67,11 +67,12 @@ def data_build(symbol: str = typer.Option(..., help="Instrument symbol, e.g. NQ"
     from propquant.data import bars, dukascopy, store
     from propquant.vault import writer
 
-    one = bars.mid_bars(dukascopy.load_raw(symbol, "bid"), dukascopy.load_raw(symbol, "ask"))
+    raw = bars.mid_bars(dukascopy.load_raw(symbol, "bid"), dukascopy.load_raw(symbol, "ask"))
+    one, dropped = bars.clean(raw)
     store.write_parquet(one, store.bars_path(symbol, "1m"))
     for tf in ("5m", "15m", "1h"):
         store.write_parquet(bars.resample(one, tf), store.bars_path(symbol, tf))
-    q = bars.quality_report(one) | {"data_hash": store.frame_hash(one)}
+    q = bars.quality_report(one) | dropped | {"data_hash": store.frame_hash(one)}
     rows = [{"check": k, "value": v} for k, v in q.items()]
     writer.write_note(
         f"Reports/Data-quality-{symbol}.md",

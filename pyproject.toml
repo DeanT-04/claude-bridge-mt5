@@ -48,6 +48,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF"]
+# Strategy classes declare defaults/param_space as ClassVar in the base class.
+ignore = ["RUF012"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

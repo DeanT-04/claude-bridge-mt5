@@ -4,7 +4,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from propquant.data.bars import mid_bars, quality_report, resample, with_session
+from propquant.data.bars import clean, mid_bars, quality_report, resample, with_session
 from propquant.data.tracking import (
     fidelity,
     intrabar_order_agreement,
@@ -90,3 +90,14 @@ def test_extreme_and_order_agreement_identical() -> None:
     ext = session_extreme_agreement(p, p)
     assert ext["sessions"] == 1 and ext["high_agree"] == 1.0 and ext["low_agree"] == 1.0
     assert intrabar_order_agreement(p, p)["order_agree"] == 1.0
+
+
+def test_clean_drops_weekend_and_thin_sessions() -> None:
+    fri = random_walk_1m(datetime(2024, 6, 14, 13, 30, tzinfo=UTC), 100, 8)  # Friday RTH
+    sat = random_walk_1m(datetime(2024, 6, 15, 13, 30, tzinfo=UTC), 100, 9)  # Saturday: never CME
+    thin = random_walk_1m(datetime(2024, 6, 17, 13, 30, tzinfo=UTC), 10, 10)  # 10-bar session
+    b = mid_bars(*(2 * [pl.concat([fri, sat, thin])]))
+    out, dropped = clean(b)
+    assert out.height == 100
+    assert dropped == {"dropped_weekend_bars": 100, "dropped_thin_sessions": 1,
+                       "dropped_thin_bars": 10}  # fmt: skip

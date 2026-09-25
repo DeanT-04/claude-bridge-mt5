@@ -30,11 +30,19 @@ def _proxy_at(symbol: str, tf: str) -> pl.DataFrame:
     return pl.read_parquet(store.bars_path(symbol, tf))
 
 
+def _comparable(df: pl.DataFrame, tf: str) -> pl.DataFrame:
+    """The 16:00 ET hourly bar spans 16:00-17:00 on futures but only 16:00-16:15 on the proxy."""
+    if tf != "1h":
+        return df
+    return df.filter(pl.col("ts").dt.convert_time_zone(TZ).dt.hour() != 16)
+
+
 def run(symbol: str) -> dict:
     style.apply()
     results, aligned = [], {}
     for tf, minutes in TIMEFRAMES:
-        proxy, fut = _proxy_at(symbol, tf), yfin.load(symbol, tf)
+        proxy = _comparable(_proxy_at(symbol, tf), tf)
+        fut = _comparable(yfin.load(symbol, tf), tf)
         fid = fidelity(proxy, fut, tf, minutes)
         verdict = all(getattr(fid, k) >= v for k, v in USABLE.items())
         results.append({**asdict(fid), "usable": "yes" if verdict else "NO"})
@@ -106,7 +114,10 @@ def _overlay(p1: pl.DataFrame, f1: pl.DataFrame, name: str) -> None:
     fig, ax = plt.subplots(figsize=(12, 3.6))
     for df, label, color in ((f1, "futures", style.SERIES[0]), (p1, "proxy", style.SERIES[1])):
         d = df.join(common, on="ts").filter(
-            (et.dt.date() == day) & (et.dt.hour() * 60 + et.dt.minute()).is_between(570, 959)
+            (et.dt.date() == day)
+            & (et.dt.hour().cast(pl.Int32) * 60 + et.dt.minute().cast(pl.Int32)).is_between(
+                570, 959
+            )
         )
         px = d["close"].to_numpy()
         ax.plot(
@@ -168,6 +179,9 @@ A timeframe is **usable** only if every one of these holds (fixed before the run
 ## Known differences
 - The proxy tracks the cash index, futures carry a basis, so price levels differ. Only returns
   and shapes are compared.
+- The 16:00 ET hourly bar is excluded from the 1h comparison (futures cover the full hour,
+  the proxy 16:00-16:15). Remaining exclusions are Yahoo's continuous-contract roll glitches
+  (e.g. 2025-09-16, alternating +/-100 bps) and after-hours news.
 - The proxy has no bars 16:15-17:00 ET (the futures still trade). Strategies can't use that window.
 - Proxy volume is a tick-activity count, not contracts. Volume-based rules need care.
 

@@ -13,10 +13,10 @@ The previous MT5 project is archived on the `archive/mt5-bridge` branch.
 | Phase | Scope | State |
 |---|---|---|
 | P0 | Scaffold, vault skeleton and sync | ✅ done |
-| P1 | Data: Dukascopy proxy bars, yfinance futures, tracking report | 🔄 code done; 2012→now download running |
+| P1 | Data: Dukascopy proxy bars, yfinance futures, tracking report | ✅ NQ done; ES downloading |
 | P2 | Apex rules, verified and tested | ✅ done |
-| P3 | numba backtest engine plus anti-cheating tests | — |
-| P4 | Gauntlet, challenge Monte Carlo, visual reports | — |
+| P3 | numba backtest engine plus anti-cheating tests | ✅ done |
+| P4 | Gauntlet, challenge Monte Carlo, visual reports | next |
 | P5 | Autonomous research ingestion | — |
 | P6 | Strategy factory | — |
 | P7 | Portfolios, then FTMO and Blueberry | — |
@@ -26,6 +26,16 @@ All gates are measured out-of-sample, across at least 1,000 challenge simulation
 
 ## Findings so far
 - **Free data works.** Dukascopy's keyless chart feed has 1-minute NASDAQ-100 and S&P 500 CFD bid/ask bars from 2012-01-19. It trades 18:00–16:15 ET, so it has no bars 16:15–17:00 ET. Yahoo supplies real CME futures bars for comparison: 1m for 8 days, 5m for 60 days, 1h for about 2 years.
+- **The proxy tracks real NQ futures almost perfectly.**
+  - Bar return correlation: 0.992 (1m), 0.998 (5m), 1.000 (1h).
+  - High and low excursions from the open: correlation ≥ 0.98.
+  - The high-before-low order inside a bar matches 98.7% of the time.
+  - Before 2016 the data has weekend quotes and gaps, so **research starts on 2016-01-01**. That's 10.7 years and 3.4M one-minute bars.
+  - Evidence is in `docs/vault/Reports/Proxy-fidelity-NQ.md`.
+- **Engine:**
+  - A numba bar loop with pessimistic fills: the stop wins when stop and target are both hit in a bar, gaps fill at the open, limit orders must trade through, and targets aren't credited on the entry bar.
+  - Known-answer tests, plus property-based **lookahead tests**: changing any future bar never changes past results.
+  - Speed on this laptop: about 290 full 10.7-year 1m backtests per minute, and about 60,000 challenge simulations per second.
 - **Apex's rules are verified** from Internet Archive captures of Apex's own help pages (the live site blocks bots). Both plan types, EOD and Intraday trailing, are encoded in `config/firms/apex.yaml`. Each rule cites its source, and every unresolved question is listed in that file. 50K list prices: EOD evaluation $550 plus $139 activation; Intraday evaluation $249 plus $59 activation.
 - **The challenge simulator** (`propquant.firms.sim`) runs the evaluation, then the funded account, then payouts. It covers trailing type and lock level, the daily loss limit, the 30-day access window, PA scaling tiers, the 5 qualifying days, 50% consistency, the safety net and the payout caps. Where a bar is ambiguous it assumes the worst case, and each rule has a boundary test.
 
