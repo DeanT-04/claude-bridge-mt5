@@ -127,3 +127,34 @@ def _meets(out: np.ndarray, g: dict) -> bool:
         and np.median(used) <= g["median_sessions_to_pass"]
         and np.percentile(used, 90) <= g["p90_sessions_to_pass"]
     )
+
+
+def choose_sizing(
+    pnl: dict, spec: ChallengeSpec, runway: int, max_micros: int, alphas: tuple, betas: tuple
+) -> tuple[int, tuple[float, float, float]]:
+    """Base size + challenge-aware policy chosen on THIS data (training only).
+
+    mu (expected daily P&L per micro) is estimated from the same training data. Objective:
+    highest end-to-end payout rate among choices with positive expected profit per attempt;
+    expected profit breaks ties. Falls back to the least-bad expected profit.
+    """
+    starts = start_sessions(len(pnl["sess_start"]) - 1, runway)
+    if len(starts) == 0:
+        return 1, (0.0, 0.0, 0.0)
+    mu = float(np.add.reduceat(pnl["d_close"], pnl["sess_start"][:-1]).mean())
+    best, best_key = None, (-np.inf, -np.inf)
+    fallback, fallback_v = (1, (0.0, 0.0, 0.0)), -np.inf
+    for size in SIZE_GRID:
+        if size > max_micros:
+            break
+        for a in alphas:
+            for b in betas:
+                pol = (float(a), float(b), max(mu, 0.0))
+                out = sim.run_many(pnl, starts, size, spec, pol)
+                v = float(attempt_value(out, spec).mean())
+                e2e = float(((out[:, 0] == sim.PASS) & (out[:, 4] >= 1)).mean())
+                if v > fallback_v:
+                    fallback, fallback_v = (size, pol), v
+                if v > 0 and (e2e, v) > best_key:
+                    best, best_key = (size, pol), (e2e, v)
+    return best if best is not None else fallback

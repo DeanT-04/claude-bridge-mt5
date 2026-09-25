@@ -68,6 +68,7 @@ def fan(r: GauntletResult, path, n_paths: int = 120) -> None:
             pnl["d_close"], pnl["d_low"], pnl["d_high"], pnl["sess_start"], pnl["sess_day"],
             int(j), sizes, spec.balance, spec.target, spec.drawdown, spec.eval_dll,
             spec.eval_max_micros, spec.eval_trail, spec.eval_trail_cap, spec.access_days,
+            r.policy_rows[r.best_plan],
         )  # fmt: skip
         ax.plot(bal, color=colors.get(res, style.NEUTRAL), alpha=0.35, lw=1)
     ax.axhline(spec.balance + spec.target, color=style.GOOD, ls="--", lw=1)
@@ -159,7 +160,8 @@ def write(r: GauntletResult) -> str:
     ]  # fmt: skip
     fold_rows = [
         {"test year": f.test_year, "params": f.params, "train SR (daily)": f.train_sharpe,
-         **{f"size {p}": f.sizes[p] for p in plans}}
+         **{f"size {p}": f.sizes[p] for p in plans},
+         **{f"policy {p}": tuple(round(x, 2) for x in f.policies[p]) for p in plans}}
         for f in r.folds
     ]  # fmt: skip
     hold = "not run"
@@ -189,8 +191,8 @@ seed: {r.seed}
 ---
 # {r.strategy}: **{r.verdict.upper()}**
 
-Best plan: **Apex {r.best_plan} 50K**. Final params {r.final_params}; sizes (micros)
-{r.final_sizes}.
+Best plan: **Apex {r.best_plan} 50K**. Final params {r.final_params}; base sizes (micros)
+{r.final_sizes}; sizing policy (alpha, beta, mu) {r.final_policies}.
 
 ## Gates (out-of-sample unless noted)
 {writer.md_table([ck.row() for ck in r.checks])}

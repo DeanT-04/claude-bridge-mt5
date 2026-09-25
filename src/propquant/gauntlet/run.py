@@ -36,6 +36,7 @@ class Fold:
     params: dict
     train_sharpe: float
     sizes: dict[str, int] = field(default_factory=dict)
+    policies: dict[str, tuple] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,6 +64,8 @@ class GauntletResult:
     sr_variance: float
     final_params: dict
     final_sizes: dict[str, int]
+    final_policies: dict[str, tuple]
+    policy_rows: dict[str, np.ndarray]  # OOS (alpha, beta, mu) per session, per plan
     holdout: dict | None
     holdout_days: np.ndarray | None
     holdout_daily: np.ndarray | None
@@ -137,10 +140,11 @@ def _stitch(results: dict[str, Result], folds: list[Fold], md: MarketData, oos_f
     return pnl, np.concatenate(trades) if trades else np.zeros((0, 7))
 
 
-def _mc(pnl: dict, sizes: np.ndarray, spec: ChallengeSpec, cfg: dict) -> tuple[dict, np.ndarray]:
+def _mc(pnl: dict, sizes: np.ndarray, spec: ChallengeSpec, cfg: dict,
+        policy=sim.NO_POLICY) -> tuple[dict, np.ndarray]:  # fmt: skip
     mc = cfg["challenge_mc"]
     starts = ch.start_sessions(len(pnl["sess_start"]) - 1, mc["min_runway_sessions"])
-    out = sim.run_many(pnl, starts, sizes, spec)
+    out = sim.run_many(pnl, starts, sizes, spec, policy)
     return ch.summarise(out, spec, mc["bootstrap"]).as_dict(), out
 
 
@@ -170,6 +174,8 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         costs.commission_side = next(iter(plans.values())).commission_micro_rt / 2
         runway = cfg["challenge_mc"]["min_runway_sessions"]
         max_micros = cfg["max_size_micros"]
+        sz_cfg = cfg.get("sizing_policy", {"alpha": [0.0], "beta": [0.0]})
+        sizing = (tuple(sz_cfg["alpha"]), tuple(sz_cfg["beta"]))
 
         # ---- 1. sweep the pre-registered grid on dev data (every point is a counted trial)
         grid = param_grid(cls)
@@ -202,19 +208,28 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
                 cache[key] = cls(**grid[k]).backtest(md_dev, costs)
             train = ch.slice_pnl(cache[key].sim_input(), 0, a)
             for plan, spec in plans.items():
-                f.sizes[plan], _ = ch.choose_size(train, spec, runway, max_micros, cfg["gates"])
+                f.sizes[plan], f.policies[plan] = ch.choose_sizing(
+                    train, spec, runway, max_micros, *sizing
+                )
             folds.append(f)
-            progress(f"  fold {y}: params={grid[k]} train SR={scores[k]:.3f} sizes={f.sizes}")
+            progress(
+                f"  fold {y}: params={grid[k]} train SR={scores[k]:.3f} sizes={f.sizes} "
+                f"policies={ {p: tuple(round(x, 2) for x in v) for p, v in f.policies.items()} }"
+            )
         oos_first = folds[0].test_sessions[0]
         oos_pnl, oos_trades = _stitch(cache, folds, md_dev, oos_first)
         oos_daily = np.add.reduceat(oos_pnl["d_close"], oos_pnl["sess_start"][:-1])
 
         # ---- 3. OOS challenge Monte Carlo per plan (sizes from each fold's training)
-        oos_ch, mc_out = {}, {}
+        oos_ch, mc_out, pol_rows = {}, {}, {}
         for plan, spec in plans.items():
             sizes = np.concatenate([np.full(f.test_sessions[1] - f.test_sessions[0],
                                             f.sizes[plan]) for f in folds])  # fmt: skip
-            oos_ch[plan], mc_out[plan] = _mc(oos_pnl, sizes, spec, cfg)
+            pol_rows[plan] = np.concatenate([
+                np.tile(f.policies[plan], (f.test_sessions[1] - f.test_sessions[0], 1))
+                for f in folds
+            ])  # fmt: skip
+            oos_ch[plan], mc_out[plan] = _mc(oos_pnl, sizes, spec, cfg, pol_rows[plan])
         # rank plans by the chance of completing every stage; EV breaks ties
         best_plan = max(oos_ch, key=lambda p: (oos_ch[p]["end_to_end_payout"],
                                                oos_ch[p]["ev_per_attempt"]))  # fmt: skip
@@ -243,8 +258,10 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         if key not in cache:
             cache[key] = cls(**final).backtest(md_dev, costs)
         dev_pnl = cache[key].sim_input()
-        final_sizes = {p: ch.choose_size(dev_pnl, s, runway, max_micros, cfg["gates"])[0]
-                       for p, s in plans.items()}  # fmt: skip
+        final_sizing = {p: ch.choose_sizing(dev_pnl, s, runway, max_micros, *sizing)
+                        for p, s in plans.items()}  # fmt: skip
+        final_sizes = {p: v[0] for p, v in final_sizing.items()}
+        final_policies = {p: v[1] for p, v in final_sizing.items()}
         holdout, h_days, h_daily, note = None, None, None, ""
         uses = reg.holdout_uses(name, final)
         if uses and not force_holdout:
@@ -255,7 +272,8 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             h_pnl = ch.slice_pnl(full.sim_input(), dev_end, len(md_full.sess_day))
             h_daily = np.add.reduceat(h_pnl["d_close"], h_pnl["sess_start"][:-1])
             h_days = h_pnl["sess_day"]
-            holdout = {p: _mc(h_pnl, np.full(len(h_days), final_sizes[p]), s, cfg)[0]
+            holdout = {p: _mc(h_pnl, np.full(len(h_days), final_sizes[p]), s, cfg,
+                              final_policies[p])[0]
                        for p, s in plans.items()}  # fmt: skip
             note = "first access" if not uses else f"FORCED re-access (used {uses}x before)"
         hg = cfg["gates"]["holdout"]
@@ -277,7 +295,8 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             oos_days=oos_pnl["sess_day"], oos_daily=oos_daily, oos_trades=oos_trades,
             oos_challenge=oos_ch, best_plan=best_plan, re_runs=re_runs, re_percentile=re_pct,
             oos_total=oos_total, psr=psr, dsr=dsr, n_trials=n_trials, sr_variance=sr_var,
-            final_params=final, final_sizes=final_sizes, holdout=holdout, holdout_days=h_days,
+            final_params=final, final_sizes=final_sizes, final_policies=final_policies,
+            policy_rows=pol_rows, holdout=holdout, holdout_days=h_days,
             holdout_daily=h_daily, holdout_note=note, checks=cs, verdict=v, failed=failed,
             mc_paths={"out": mc_out[best_plan], "pnl": oos_pnl},
         )  # fmt: skip

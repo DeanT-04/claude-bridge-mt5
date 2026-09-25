@@ -37,11 +37,15 @@ def sizes(p: dict, size: int) -> np.ndarray:
     return np.full(len(p["sess_start"]) - 1, size, dtype=np.int64)
 
 
+def pols(p: dict) -> np.ndarray:
+    return sim.policy_rows(len(p["sess_start"]) - 1, sim.NO_POLICY)
+
+
 def run_eval(p: dict, spec=EOD, size: int = 1, s0: int = 0):
     return sim.sim_eval(
         p["d_close"], p["d_low"], p["d_high"], p["sess_start"], p["sess_day"], s0, sizes(p, size),
         spec.balance, spec.target, spec.drawdown, spec.eval_dll, spec.eval_max_micros,
-        spec.eval_trail, spec.eval_trail_cap, spec.access_days,
+        spec.eval_trail, spec.eval_trail_cap, spec.access_days, pols(p),
     )  # fmt: skip
 
 
@@ -51,7 +55,7 @@ def run_pa(p: dict, spec=EOD, size: int = 1, s1: int = 0):
         p["d_close"], p["d_low"], p["d_high"], p["sess_start"], s1, sizes(p, size), spec.balance,
         spec.drawdown, spec.pa_trail, spec.pa_trail_cap, tf, tm, td, spec.min_daily_profit,
         spec.payout_min_days, spec.payout_consistency, spec.payout_min_amount,
-        np.asarray(spec.payout_caps, dtype=np.float64), spec.safety_net,
+        np.asarray(spec.payout_caps, dtype=np.float64), spec.safety_net, pols(p),
     )  # fmt: skip
 
 
@@ -240,6 +244,27 @@ def test_eval_path_matches_sim_eval(spec) -> None:
         b = sim.eval_path(
             p["d_close"], p["d_low"], p["d_high"], p["sess_start"], p["sess_day"], s0, sz,
             spec.balance, spec.target, spec.drawdown, spec.eval_dll, spec.eval_max_micros,
-            spec.eval_trail, spec.eval_trail_cap, spec.access_days,
+            spec.eval_trail, spec.eval_trail_cap, spec.access_days, pols(p),
         )[0]  # fmt: skip
         assert a == b
+
+
+def test_policy_cushion_scaling_shrinks_size_near_threshold() -> None:
+    pol = np.array([1.0, 0.0, 0.0])
+    # full cushion -> base size; half cushion -> half size
+    assert sim._policy_size(40, 50_000.0, 48_000.0, 2000.0, 3000.0, 30, pol, 60) == 40
+    assert sim._policy_size(40, 49_000.0, 48_000.0, 2000.0, 3000.0, 30, pol, 60) == 20
+
+
+def test_policy_deadline_boost_is_capped() -> None:
+    pol = np.array([0.0, 1.0, 10.0])  # $10/micro/day expected
+    # 10 micros x $10 x 5 trading days = $500 expected vs $3,000 needed -> x3 cap -> 30
+    assert sim._policy_size(10, 50_000.0, 48_000.0, 2000.0, 3000.0, 7, pol, 60) == 30
+    assert sim._policy_size(10, 50_000.0, 48_000.0, 2000.0, 3000.0, 7, pol, 20) == 20
+
+
+def test_policy_off_is_fixed_size() -> None:
+    p = pnl([[bar(100)] for _ in range(40)])
+    a = sim.run_many(p, np.array([0, 5]), 30, EOD)
+    b = sim.run_many(p, np.array([0, 5]), 30, EOD, (0.0, 0.0, 0.0))
+    np.testing.assert_array_equal(a, b)

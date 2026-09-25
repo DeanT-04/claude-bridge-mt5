@@ -48,9 +48,34 @@ def _session(bal, thr, peak, trail, cap, dd, dll, size, d_close, d_low, d_high, 
     return bal, thr, peak, OK
 
 
+NO_POLICY = (0.0, 0.0, 0.0)  # (alpha, beta, mu): fixed sizing
+
+
+@njit(cache=True)
+def _policy_size(base, bal, thr, dd, remaining, days_left, pol, max_micros):
+    """Size for the coming session from account state known at the open.
+
+    alpha: size x (cushion / max drawdown)^alpha, trading smaller near the threshold.
+    beta:  if the expected profit over the days left (mu x size x trading days) falls short of
+           the remaining target, scale up by (shortfall ratio)^beta, capped at 3x.
+    mu:    expected daily P&L per micro, estimated on TRAINING data only.
+    """
+    alpha, beta, mu = pol[0], pol[1], pol[2]
+    f = 1.0
+    if alpha > 0.0:
+        c = max(bal - thr, 0.0) / dd
+        f *= min(c, 1.5) ** alpha
+    if beta > 0.0 and mu > 0.0 and remaining > 0.0 and days_left > 0:
+        expected = mu * base * max(days_left * 5.0 / 7.0, 1.0)
+        if expected < remaining:
+            f *= min(remaining / expected, 3.0) ** beta
+    sz = int(round(base * f))  # noqa: RUF046 (numba needs the explicit int)
+    return max(1, min(sz, max_micros))
+
+
 @njit(cache=True)
 def sim_eval(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, target, dd, dll,
-             max_micros, trail, cap, access_days):  # fmt: skip
+             max_micros, trail, cap, access_days, pol):  # fmt: skip
     """Returns (outcome, last_session, sessions_used, largest_day_share_of_profit).
 
     ``size`` is the number of micros per session (array, one entry per session).
@@ -62,8 +87,11 @@ def sim_eval(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, targ
         if sess_day[s] - sess_day[s0] >= access_days:
             return EXPIRED, s, s - s0, 0.0
         day_start = bal
+        days_left = access_days - (sess_day[s] - sess_day[s0])
+        sz = _policy_size(size[s], bal, thr, dd, start + target - bal, days_left, pol[s],
+                          max_micros)  # fmt: skip
         bal, thr, peak, code = _session(
-            bal, thr, peak, trail, cap, dd, dll, min(size[s], max_micros), d_close, d_low, d_high,
+            bal, thr, peak, trail, cap, dd, dll, sz, d_close, d_low, d_high,
             sess_start[s], sess_start[s + 1],
         )  # fmt: skip
         if code == BREACH:
@@ -79,7 +107,7 @@ def sim_eval(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, targ
 @njit(cache=True)
 def sim_pa(d_close, d_low, d_high, sess_start, s1, size, start, dd, trail, cap, tier_from,
            tier_micros, tier_dll, min_daily, min_days, consistency, min_amount, caps,
-           safety_net):  # fmt: skip
+           safety_net, pol):  # fmt: skip
     """Returns (outcome, payouts, total_paid, first_payout_session, last_session, balance)."""
     bal, thr, peak = start, start - dd, start
     base, qual, best_day = start, 0, 0.0
@@ -90,7 +118,8 @@ def sim_pa(d_close, d_low, d_high, sess_start, s1, size, start, dd, trail, cap, 
         for t in range(len(tier_from)):
             if bal - start >= tier_from[t]:
                 tier = t
-        sz = min(size[s], tier_micros[tier])
+        # in the PA only cushion scaling applies (no deadline)
+        sz = _policy_size(size[s], bal, thr, dd, 0.0, 0, pol[s], tier_micros[tier])
         day_start = bal
         bal, thr, peak, code = _session(
             bal, thr, peak, trail, cap, dd, tier_dll[tier], sz, d_close, d_low, d_high,
@@ -126,7 +155,7 @@ def sim_pa(d_close, d_low, d_high, sess_start, s1, size, start, dd, trail, cap, 
 
 @njit(parallel=True, cache=True)
 def _run_many(d_close, d_low, d_high, sess_start, sess_day, starts, size, e_args, p_args,
-              tier_from, tier_micros, tier_dll, caps):  # fmt: skip
+              tier_from, tier_micros, tier_dll, caps, pol):  # fmt: skip
     m = len(starts)
     out = np.zeros((m, 9))
     start, target, dd, dll, max_micros, e_trail, e_cap, access = e_args
@@ -134,14 +163,14 @@ def _run_many(d_close, d_low, d_high, sess_start, sess_day, starts, size, e_args
     for j in prange(m):
         e, s_end, used, share = sim_eval(
             d_close, d_low, d_high, sess_start, sess_day, starts[j], size, start, target, dd,
-            dll, int(max_micros), int(e_trail), e_cap, int(access),
+            dll, int(max_micros), int(e_trail), e_cap, int(access), pol,
         )  # fmt: skip
         out[j, 0], out[j, 1], out[j, 2] = e, used, share
         if e == PASS:
             p, k, paid, first, last, _bal = sim_pa(
                 d_close, d_low, d_high, sess_start, s_end + 1, size, start, dd, int(p_trail),
                 p_cap, tier_from, tier_micros, tier_dll, min_daily, int(min_days), consistency,
-                min_amount, caps, safety,
+                min_amount, caps, safety, pol,
             )  # fmt: skip
             out[j, 3], out[j, 4], out[j, 5] = p, k, paid
             out[j, 6] = first - s_end if first >= 0 else -1
@@ -163,10 +192,19 @@ COLUMNS = (
 )
 
 
-def run_many(pnl: dict[str, np.ndarray], starts: np.ndarray, size_micros, spec: ChallengeSpec):
+def policy_rows(n_sessions: int, policy) -> np.ndarray:
+    """(alpha, beta, mu) per session: a tuple for all sessions or an (n, 3) array."""
+    return np.ascontiguousarray(
+        np.broadcast_to(np.asarray(policy, dtype=np.float64), (n_sessions, 3))
+    )
+
+
+def run_many(pnl: dict[str, np.ndarray], starts: np.ndarray, size_micros, spec: ChallengeSpec,
+             policy=NO_POLICY):  # fmt: skip
     """Simulate one purchased challenge per start session. Returns an (m, 9) array (COLUMNS).
 
     ``size_micros``: an int, or an array with one size per session (walk-forward folds).
+    ``policy``: (alpha, beta, mu) for challenge-aware sizing, or one row per session.
     """
     n_sess = len(pnl["sess_start"]) - 1
     sizes = np.broadcast_to(np.asarray(size_micros, dtype=np.int64), (n_sess,)).copy()
@@ -184,12 +222,13 @@ def run_many(pnl: dict[str, np.ndarray], starts: np.ndarray, size_micros, spec: 
         pnl["d_close"], pnl["d_low"], pnl["d_high"], pnl["sess_start"], pnl["sess_day"],
         np.asarray(starts, dtype=np.int64), sizes, e_args, p_args,
         tier_from, tier_micros, tier_dll, np.asarray(spec.payout_caps, dtype=np.float64),
+        policy_rows(n_sess, policy),
     )  # fmt: skip
 
 
 @njit(cache=True)
 def eval_path(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, target, dd, dll,
-              max_micros, trail, cap, access_days):  # fmt: skip
+              max_micros, trail, cap, access_days, pol):  # fmt: skip
     """Same rules as ``sim_eval`` but records the closing balance and threshold each session.
 
     Report-only (fan charts). A test pins it to ``sim_eval``'s outcome.
@@ -203,8 +242,11 @@ def eval_path(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, tar
     for s in range(s0, n):
         if sess_day[s] - sess_day[s0] >= access_days:
             return EXPIRED, bal_out, thr_out
+        days_left = access_days - (sess_day[s] - sess_day[s0])
+        sz = _policy_size(size[s], bal, thr, dd, start + target - bal, days_left, pol[s],
+                          max_micros)  # fmt: skip
         bal, thr, peak, code = _session(
-            bal, thr, peak, trail, cap, dd, dll, min(size[s], max_micros), d_close, d_low, d_high,
+            bal, thr, peak, trail, cap, dd, dll, sz, d_close, d_low, d_high,
             sess_start[s], sess_start[s + 1],
         )  # fmt: skip
         k += 1

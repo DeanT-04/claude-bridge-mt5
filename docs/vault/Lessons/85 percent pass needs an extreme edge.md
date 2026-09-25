@@ -35,3 +35,19 @@ The intraday-trailing plan does slightly worse on pass rate at the same Sharpe.
 ## How to apply it next time
 - Rank on end-to-end payout and expected profit per attempt. Evaluation pass rate is a consequence of those, not the goal.
 - To raise the pass rate, raise the **daily** Sharpe: more independent trades per day, more instruments, portfolios of uncorrelated strategies. P7 portfolios are the realistic route to 85%.
+
+## Update: challenge-aware sizing (same day)
+Sizing each session from the account's state gives a large lift for the **same** edge:
+- cushion scaling: size × (cushion ÷ drawdown)^α
+- a deadline boost when the account is behind the pace needed to hit the target
+
+Best of 48 settings on the synthetic data (so somewhat optimistic):
+
+| Sharpe | Reach payout, fixed size | Reach payout, aware sizing | Expected profit per attempt |
+|---|---|---|---|
+| 2 | 25% | 40% | $977 → $3,537 |
+| 3 | 38% | 51% | $2,889 → $5,390 |
+| 4 | 51% | 61% | $4,883 → $5,415 |
+| 6 | 72% | 78% | $8,038 → $8,781 |
+
+The gauntlet now chooses the base size and (α, β) on each fold's training data (`config/research.yaml: sizing_policy`). On the real batch-1 strategies the lift was small: late_trend reached a payout 4.8% → 6.1% of the time, orb 3.8% → 8.5%. Sizing multiplies an edge; it can't create one.

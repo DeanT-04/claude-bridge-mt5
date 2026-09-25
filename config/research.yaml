@@ -10,7 +10,11 @@ walk_forward:
   # the last fold tests 2025-01-01 .. holdout_start
 
 firm: {name: apex, plans: [eod, intraday], size: 50K}
-max_size_micros: 60          # search sizes 1..max (Apex 50K eval limit = 6 minis = 60 micros)
+max_size_micros: 60
+# Challenge-aware sizing (added 2026-09-25 after the synthetic calibration, before any real
+# strategy passed): size x (cushion/drawdown)^alpha, x (shortfall)^beta near the deadline.
+# Chosen per fold on training data together with the base size; alpha=beta=0 is fixed size.
+sizing_policy: {alpha: [0.0, 0.5, 1.0, 2.0], beta: [0.0, 0.5, 1.0]}          # search sizes 1..max (Apex 50K eval limit = 6 minis = 60 micros)
 costs: {slip_ticks: 1.0}
 
 challenge_mc:
