@@ -1,0 +1,58 @@
+[project]
+name = "propquant"
+version = "0.1.0"
+description = "Prop-firm strategy research lab: ingest ideas, backtest, run gauntlets, keep the evidence."
+readme = "README.md"
+authors = [{ name = "Deano" }]
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.5.5",
+    "feedparser>=6.0.14",
+    "httpx>=0.28.1",
+    "matplotlib>=3.11.2",
+    "numba>=0.67.0",
+    "numpy>=2.5.3",
+    "optuna>=5.0.0",
+    "polars>=1.44.2",
+    "pyarrow>=25.0.1",
+    "pydantic>=2.13.5",
+    "pypdf>=6.19.0",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "scipy>=1.18.1",
+    "trafilatura>=2.2.0",
+    "typer>=0.27.2",
+    "yfinance>=1.7.0",
+    "youtube-transcript-api>=1.2.4",
+    "yt-dlp>=2026.8.19",
+]
+
+[project.scripts]
+propquant = "propquant.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.168.1",
+    "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.16.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "network: test hits the internet (deselect with -m 'not network')",
+    "slow: long-running test",
+]

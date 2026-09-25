@@ -1,5 +1,14 @@
-runtime/
+# Python / uv
+.venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-*.ex5
+.ruff_cache/
+.hypothesis/
+
+# Local data and caches (large, regenerable)
+data/
+cache/
+
+# Obsidian per-user UI state inside the mirrored vault
+docs/vault/.obsidian/
