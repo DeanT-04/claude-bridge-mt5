@@ -10,7 +10,7 @@ from registry import db
 
 from . import stats
 from .gauntlet import costs_for
-from .strategies import FAMILIES
+from .strategies import FAMILIES, get_family
 
 PARITY_MIN_MATCH = 0.85      # share of trades matched by entry bar + direction
 PARITY_MAX_R_MAE = 0.15      # mean abs R difference on matched trades
@@ -58,7 +58,7 @@ BAR_SECONDS = {"M15": 900, "M30": 1800, "H1": 3600, "H4": 14400}
 
 
 def make(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, con=None):
-    fam = FAMILIES[family]
+    fam = get_family(family)
     g = config.gauntlet()
 
     def confirm(params, t_from, t_to) -> dict:

@@ -15,11 +15,11 @@ from bridge import compiler, tester  # noqa: E402
 from research import data  # noqa: E402
 from research.engine import Costs  # noqa: E402
 from research.mt5_confirm import BAR_SECONDS, NOTIONAL_DEPOSIT, parity  # noqa: E402
-from research.strategies import FAMILIES  # noqa: E402
+from research.strategies import FAMILIES, get_family  # noqa: E402
 
 
 def check(fam_name, symbol, tf, d0, d1, point, params=None) -> dict:
-    fam = FAMILIES[fam_name]
+    fam = get_family(fam_name)
     p = params or fam.Params()
     inputs = {k: tester.Param(v) for k, v in p.dict().items()}
     inputs["InpRiskPct"] = tester.Param(1.0)

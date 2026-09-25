@@ -56,8 +56,8 @@ def backtest_r(sleeve: deploy.Sleeve, years: float = 3.0) -> np.ndarray:
     """R-multiples of the sleeve's rules on recent history (the forward test's reference)."""
     from research import data
     from research.gauntlet import costs_for
-    from research.strategies import FAMILIES
-    fam = FAMILIES[sleeve.family]
+    from research.strategies import FAMILIES, get_family
+    fam = get_family(sleeve.family)
     bars = data.bars(sleeve.symbol, sleeve.timeframe)
     start = int(np.searchsorted(bars["time"], bars["time"][-1] - years * 365.25 * 86400))
     p = fam.Params(**{k: v for k, v in sleeve.params.items() if k in fam.Params.__dataclass_fields__})

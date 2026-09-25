@@ -10,7 +10,7 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 | M1 | Bridge, tester automation, research engine, gauntlet, MT5 parity | ✅ done |
 | M2 | Symbol auto-discovery + cost filter, 7 strategy families, research queue | ✅ done |
 | M3 | Portfolio host EA, approval-gated demo deployment, monitoring, `promote_to_live` | 🔨 in progress |
-| M4 | Generated / genetic strategies (grammar → Python + MQL5) | planned |
+| M4 | Generated / genetic strategies (building blocks → Python + MQL5) | 🔨 in progress |
 | M5 | ML strategies (ONNX) | planned |
 | M6 | Live readiness + VPS migration | planned |
 | M7 | Prop-firm rule profiles | planned |
@@ -70,6 +70,29 @@ time exit and a session filter.
 | `orb` | close crosses today's opening range (server hours) | 99.3% |
 | `keltner` | close crosses EMA ± k·ATR | 100% |
 | `hour_momentum` | at a fixed hour, trade the direction of the last N bars | 100% |
+
+## Generated strategies (M4)
+`QB_GENERIC` (family id 7) is one interpreter, in `Signals.mqh` (`CSigGeneric`) and
+`research/strategies/generic.py`, whose **structure is its parameters**:
+
+- **Trigger** (fires on a bar-1/bar-2 cross), optionally inverted: EMA cross, Donchian breakout,
+  RSI level cross, Bollinger breakout, Keltner breakout, ATR-scaled momentum.
+- **Up to two filters:** close vs EMA trend, EMA slope, high or low volatility (ATR14 ÷ ATR n),
+  RSI side of 50.
+- Shared ATR stop/target, time exit and session.
+
+Any genome therefore runs unchanged in the Python engine, the MT5 tester (`QB_Rules`) and
+`QB_Host`. Parity vs MT5 (XAUUSD H1, H1 2024): every trigger and filter 92.5–100%.
+
+`research/genetic.py` evolves genomes (80 per generation × 40 generations, block crossover,
+step mutation) on **pre-holdout data only**. Fitness is the worse of the two halves' Sharpe
+minus 0.1 per filter, with ≥ 40 trades per half. Every evaluated genome is logged to one shared
+`generic` trial pool per symbol/timeframe, so the Deflated Sharpe hurdle reflects the whole
+search. The top 5 structurally distinct genomes become families `gen_<hash>` (stored in the
+`genomes` table) and go through the unchanged gauntlet, with their ±1-step neighbourhood as the
+walk-forward grid.
+
+Queue it: `python scripts/research.py enqueue --families evolve --symbols small --tf H1,M30`.
 
 ## Symbol universe
 `research/universe.py` scans every tradable non-equity symbol (equities optional) and records

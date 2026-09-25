@@ -16,7 +16,7 @@ from registry import db
 
 from . import benchmarks, montecarlo, sizing, stats
 from .engine import Costs, Trade, simulate
-from .strategies import FAMILIES
+from .strategies import FAMILIES, get_family
 
 # Walk-forward window lengths (in-sample, out-of-sample months) per timeframe. Lower timeframes
 # have less history on BlackBull (terminal max-bars cap) but more trades per month.
@@ -94,7 +94,9 @@ def acct_to_target_rate(get_spec, acct_ccy: str, target_ccy: str) -> float:
 def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, acct_rate: float = 1.0,
         con=None, mt5_confirm=None, progress=print) -> dict:
     """Run the full gauntlet. `mt5_confirm(params, from, to) -> dict` is optional (M1 wiring)."""
-    fam = FAMILIES[family]
+    fam = get_family(family)
+    # Generated strategies share one multiple-testing pool per symbol/timeframe.
+    trial_key = getattr(fam, "trial_key", family)
     g = config.gauntlet()
     acc = config.settings()["account"]
     con = con or db.connect()
@@ -132,7 +134,7 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, 
     stages["screen"] = {"pass": best_screen >= SCREEN_MIN_SHARPE, "best_sharpe": best_screen,
                         "configs": len(sample)}
     if not stages["screen"]["pass"]:
-        db.log_trials(con, family, symbol, timeframe, screen_rows)   # these evaluations count too
+        db.log_trials(con, trial_key, symbol, timeframe, screen_rows)   # these evaluations count too
         return _finish(con, family, symbol, timeframe, {}, "fail", stages)
     progress(f"walk-forward: {len(windows)} windows x {len(grid)} configs")
 
@@ -168,7 +170,7 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, 
         oos_trades += tr
         is_sharpes.append(best_s)
         oos_sharpes.append(stats.metrics(tr, span_days=_span(bars, w.is_end, w.oos_end))["sharpe"] if tr else 0.0)
-    db.log_trials(con, family, symbol, timeframe, trial_rows)
+    db.log_trials(con, trial_key, symbol, timeframe, trial_rows)
 
     oos_span = _span(bars, windows[0].is_end, windows[-1].oos_end)
     m = stats.metrics(oos_trades, span_days=oos_span)
@@ -196,7 +198,7 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, 
                                "final_params": final.dict()}
 
     # ---- 3. deflated Sharpe ------------------------------------------------------------
-    n_trials, trial_srs = db.trial_stats(con, family, symbol, timeframe)
+    n_trials, trial_srs = db.trial_stats(con, trial_key, symbol, timeframe)
     r_oos = np.array([t.r for t in oos_trades])
     dsr = stats.deflated_sharpe(r_oos, n_trials, trial_srs)
     stages["deflated_sharpe"] = {"pass": dsr["dsr"] >= g["dsr"]["min_prob"], **dsr}

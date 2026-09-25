@@ -53,6 +53,8 @@ public:
       sp.channel = 20; sp.fast = 20; sp.slow = 100; sp.rsi_period = 14; sp.rsi_lo = 30; sp.rsi_hi = 70;
       sp.bb_period = 20; sp.bb_dev = 2.0; sp.or_start = 8; sp.or_hours = 2; sp.kc_period = 20;
       sp.kc_mult = 1.5; sp.entry_hour = 10; sp.lookback = 4;
+      sp.trig = 0; sp.trig_p1 = 20; sp.trig_p2 = 2.0; sp.invert = 0;
+      sp.f1 = 0; sp.f1_p1 = 100; sp.f1_p2 = 1.0; sp.f2 = 0; sp.f2_p1 = 100; sp.f2_p2 = 1.0;
    }
    ~CSleeve() { Release(); }
 
@@ -138,6 +140,16 @@ void SetSleeveField(CSleeve &s, const string k, const string v)
    else if(k == "InpKcMult") s.sp.kc_mult = StringToDouble(v);
    else if(k == "InpEntryHour") s.sp.entry_hour = (int)StringToInteger(v);
    else if(k == "InpLookback") s.sp.lookback = (int)StringToInteger(v);
+   else if(k == "InpTrig") s.sp.trig = (int)StringToInteger(v);
+   else if(k == "InpTrigP1") s.sp.trig_p1 = (int)StringToInteger(v);
+   else if(k == "InpTrigP2") s.sp.trig_p2 = StringToDouble(v);
+   else if(k == "InpInvert") s.sp.invert = (int)StringToInteger(v);
+   else if(k == "InpF1") s.sp.f1 = (int)StringToInteger(v);
+   else if(k == "InpF1P1") s.sp.f1_p1 = (int)StringToInteger(v);
+   else if(k == "InpF1P2") s.sp.f1_p2 = StringToDouble(v);
+   else if(k == "InpF2") s.sp.f2 = (int)StringToInteger(v);
+   else if(k == "InpF2P1") s.sp.f2_p1 = (int)StringToInteger(v);
+   else if(k == "InpF2P2") s.sp.f2_p2 = StringToDouble(v);
 }
 
 void ClearSleeves()

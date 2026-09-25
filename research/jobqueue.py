@@ -11,7 +11,10 @@ from bridge import config, mt5_client
 from registry import db
 
 from . import data, gauntlet
-from .strategies import FAMILIES
+from .strategies import FAMILIES, get_family
+
+
+EVOLVE = "evolve"     # pseudo-family: run the genetic search, then queue gauntlets for its picks
 
 
 def _now() -> str:
@@ -21,7 +24,8 @@ def _now() -> str:
 def enqueue(families: list[str], symbols: list[str], timeframes: list[str], redo: bool = False, con=None) -> int:
     """Add jobs; skips combos already queued/running, and done ones unless redo."""
     con = con or db.connect()
-    unknown = set(families) - set(FAMILIES)
+    from .strategies import is_known
+    unknown = {f for f in families if f != EVOLVE and not is_known(f)}
     if unknown:
         raise ValueError(f"unknown families {sorted(unknown)}")
     skip = ("queued", "running") if redo else ("queued", "running", "done")
@@ -93,10 +97,18 @@ def _worker(rate: float) -> int:
         try:
             bars = data.bars(job["symbol"], job["timeframe"])     # served from cache
             spec = data.spec(job["symbol"])
-            res = gauntlet.run(job["family"], job["symbol"], job["timeframe"], bars, spec, rate,
-                               con=con, progress=lambda *_: None)
-            con.execute("UPDATE jobs SET status='done', gauntlet_id=?, verdict=?, finished=? WHERE id=?",
-                        (res["id"], res["verdict"], _now(), job["id"]))
+            if job["family"] == EVOLVE:
+                from . import genetic
+                picks = genetic.evolve(job["symbol"], job["timeframe"], bars, spec, con=con,
+                                       progress=lambda *_: None)
+                enqueue([p["family"] for p in picks], [job["symbol"]], [job["timeframe"]], con=con)
+                con.execute("UPDATE jobs SET status='done', verdict=?, finished=? WHERE id=?",
+                            (f"evolved:{len(picks)}", _now(), job["id"]))
+            else:
+                res = gauntlet.run(job["family"], job["symbol"], job["timeframe"], bars, spec, rate,
+                                   con=con, progress=lambda *_: None)
+                con.execute("UPDATE jobs SET status='done', gauntlet_id=?, verdict=?, finished=? WHERE id=?",
+                            (res["id"], res["verdict"], _now(), job["id"]))
         except Exception:
             con.execute("UPDATE jobs SET status='error', error=?, finished=? WHERE id=?",
                         (traceback.format_exc()[-2000:], _now(), job["id"]))
@@ -125,7 +137,7 @@ def confirm_pending(con=None, progress=print) -> list[dict]:
                        "WHERE verdict='pending_mt5'").fetchall()
     out = []
     for r in rows:
-        fam = FAMILIES[r["family"]]
+        fam = get_family(r["family"])
         params = fam.Params(**json.loads(r["params"]))
         bars = data.bars(r["symbol"], r["timeframe"])
         spec = data.spec(r["symbol"])

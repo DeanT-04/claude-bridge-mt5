@@ -14,6 +14,7 @@ enum ENUM_QB_FAMILY
    QB_ORB           = 4,
    QB_KELTNER       = 5,
    QB_HOUR_MOMENTUM = 6,
+   QB_GENERIC       = 7,   // M4: trigger + filters encoded as parameters
 };
 
 struct QBSignalParams
@@ -25,6 +26,10 @@ struct QBSignalParams
    int    or_start, or_hours;
    int    kc_period;  double kc_mult;
    int    entry_hour, lookback;
+   // generic (QB_GENERIC): see CSigGeneric
+   int    trig, trig_p1; double trig_p2; int invert;
+   int    f1, f1_p1; double f1_p2;
+   int    f2, f2_p1; double f2_p2;
 };
 
 class CQBSignal
@@ -199,6 +204,149 @@ public:
    }
 };
 
+//--- QB_GENERIC: one trigger (optionally inverted) gated by up to two filters.
+//    Twin: research/strategies/generic.py. Triggers fire on a cross between bars [2] and [1].
+//    trig: 0 EMA cross (p1 period)         1 Donchian breakout (p1 channel)
+//          2 RSI level cross (p1, p2 = L; long crosses up through L, short down through 100-L)
+//          3 Bollinger breakout (p1, p2 dev) 4 Keltner breakout (p1, p2 mult)
+//          5 momentum: c1-c[1+p1] crosses p2*ATR14 (mirror for short)
+//    filters: 0 none  1 close on trend side of EMA(p1)  2 EMA(p1) slope over 5 bars agrees
+//             3 ATR14/ATR(p1) > p2 (high vol)  4 ATR14/ATR(p1) < p2 (low vol)
+//             5 RSI(p1) on the trade's side of 50
+class CSigGeneric : public CQBSignal
+{
+   int m_t1, m_t2, m_atr14;          // trigger handles
+   int m_fh[2][2];                   // filter handles
+   int m_ft[2], m_fp1[2]; double m_fp2[2];
+
+   bool MakeFilter(const int k)
+   {
+      m_fh[k][0] = INVALID_HANDLE; m_fh[k][1] = INVALID_HANDLE;
+      switch(m_ft[k])
+      {
+         case 1: case 2: m_fh[k][0] = iMA(m_sym, m_tf, m_fp1[k], 0, MODE_EMA, PRICE_CLOSE); break;
+         case 3: case 4: m_fh[k][0] = iATR(m_sym, m_tf, 14); m_fh[k][1] = iATR(m_sym, m_tf, m_fp1[k]);
+                         if(m_fh[k][1] == INVALID_HANDLE) return false; break;
+         case 5: m_fh[k][0] = iRSI(m_sym, m_tf, m_fp1[k], PRICE_CLOSE); break;
+         default: return true;
+      }
+      return m_fh[k][0] != INVALID_HANDLE;
+   }
+
+   bool FilterOk(const int k, const int d)
+   {
+      double a[], b[];
+      double c1 = iClose(m_sym, m_tf, 1);
+      switch(m_ft[k])
+      {
+         case 0: return true;
+         case 1: if(!Buf(m_fh[k][0], 0, 1, 1, a)) return false; return d > 0 ? c1 > a[0] : c1 < a[0];
+         case 2: if(!Buf(m_fh[k][0], 0, 1, 6, a)) return false;              // a[0]=bar1, a[5]=bar6
+                 return d > 0 ? a[0] > a[5] : a[0] < a[5];
+         case 3: case 4:
+                 if(!Buf(m_fh[k][0], 0, 1, 1, a) || !Buf(m_fh[k][1], 0, 1, 1, b) || b[0] <= 0) return false;
+                 return m_ft[k] == 3 ? a[0] / b[0] > m_fp2[k] : a[0] / b[0] < m_fp2[k];
+         case 5: if(!Buf(m_fh[k][0], 0, 1, 1, a)) return false; return d > 0 ? a[0] > 50 : a[0] < 50;
+      }
+      return false;
+   }
+
+   int Trigger()
+   {
+      double c1 = iClose(m_sym, m_tf, 1), c2 = iClose(m_sym, m_tf, 2);
+      double x[], y[], z[];
+      switch(m_p.trig)
+      {
+         case 0:
+            if(!Buf(m_t1, 0, 1, 2, x)) return 0;
+            if(c1 > x[0] && c2 <= x[1]) return 1;
+            if(c1 < x[0] && c2 >= x[1]) return -1;
+            return 0;
+         case 1:
+         {
+            int hh = iHighest(m_sym, m_tf, MODE_HIGH, m_p.trig_p1, 2), ll = iLowest(m_sym, m_tf, MODE_LOW, m_p.trig_p1, 2);
+            if(hh < 0 || ll < 0) return 0;
+            if(c1 > iHigh(m_sym, m_tf, hh)) return 1;
+            if(c1 < iLow(m_sym, m_tf, ll)) return -1;
+            return 0;
+         }
+         case 2:
+         {
+            if(!Buf(m_t1, 0, 1, 2, x)) return 0;
+            double lo = m_p.trig_p2, hi = 100.0 - m_p.trig_p2;
+            if(x[1] < lo && x[0] >= lo) return 1;
+            if(x[1] > hi && x[0] <= hi) return -1;
+            return 0;
+         }
+         case 3:
+            if(!Buf(m_t1, 1, 1, 2, x) || !Buf(m_t1, 2, 1, 2, y)) return 0;
+            if(c1 > x[0] && c2 <= x[1]) return 1;
+            if(c1 < y[0] && c2 >= y[1]) return -1;
+            return 0;
+         case 4:
+         {
+            if(!Buf(m_t1, 0, 1, 2, x) || !Buf(m_t2, 0, 1, 2, y)) return 0;
+            double u1 = x[0] + m_p.trig_p2 * y[0], u2 = x[1] + m_p.trig_p2 * y[1];
+            double l1 = x[0] - m_p.trig_p2 * y[0], l2 = x[1] - m_p.trig_p2 * y[1];
+            if(c1 > u1 && c2 <= u2) return 1;
+            if(c1 < l1 && c2 >= l2) return -1;
+            return 0;
+         }
+         case 5:
+         {
+            if(!Buf(m_atr14, 0, 1, 2, z)) return 0;
+            double m1 = c1 - iClose(m_sym, m_tf, 1 + m_p.trig_p1), m2 = c2 - iClose(m_sym, m_tf, 2 + m_p.trig_p1);
+            double t1 = m_p.trig_p2 * z[0], t2 = m_p.trig_p2 * z[1];
+            if(m1 > t1 && m2 <= t2) return 1;
+            if(m1 < -t1 && m2 >= -t2) return -1;
+            return 0;
+         }
+      }
+      return 0;
+   }
+
+public:
+   CSigGeneric() : m_t1(INVALID_HANDLE), m_t2(INVALID_HANDLE), m_atr14(INVALID_HANDLE)
+   { for(int k = 0; k < 2; k++) { m_fh[k][0] = INVALID_HANDLE; m_fh[k][1] = INVALID_HANDLE; } }
+
+   bool Init(const string sym, const ENUM_TIMEFRAMES tf, const QBSignalParams &p)
+   {
+      CQBSignal::Init(sym, tf, p);
+      switch(p.trig)
+      {
+         case 0: m_t1 = iMA(sym, tf, p.trig_p1, 0, MODE_EMA, PRICE_CLOSE); break;
+         case 1: m_t1 = 0; break;                                      // no handle needed
+         case 2: m_t1 = iRSI(sym, tf, p.trig_p1, PRICE_CLOSE); break;
+         case 3: m_t1 = iBands(sym, tf, p.trig_p1, 0, p.trig_p2, PRICE_CLOSE); break;
+         case 4: m_t1 = iMA(sym, tf, p.trig_p1, 0, MODE_EMA, PRICE_CLOSE); m_t2 = iATR(sym, tf, p.trig_p1);
+                 if(m_t2 == INVALID_HANDLE) return false; break;
+         case 5: m_t1 = 0; m_atr14 = iATR(sym, tf, 14); if(m_atr14 == INVALID_HANDLE) return false; break;
+         default: return false;
+      }
+      if(m_t1 == INVALID_HANDLE) return false;
+      m_ft[0] = p.f1; m_fp1[0] = p.f1_p1; m_fp2[0] = p.f1_p2;
+      m_ft[1] = p.f2; m_fp1[1] = p.f2_p1; m_fp2[1] = p.f2_p2;
+      return MakeFilter(0) && MakeFilter(1);
+   }
+
+   int Direction()
+   {
+      int d = Trigger();
+      if(d == 0) return 0;
+      if(m_p.invert != 0) d = -d;
+      if(!FilterOk(0, d) || !FilterOk(1, d)) return 0;
+      return d;
+   }
+
+   ~CSigGeneric()
+   {
+      if(m_t1 > 0) IndicatorRelease(m_t1);
+      if(m_t2 != INVALID_HANDLE) IndicatorRelease(m_t2);
+      if(m_atr14 != INVALID_HANDLE) IndicatorRelease(m_atr14);
+      for(int k = 0; k < 2; k++) for(int j = 0; j < 2; j++) if(m_fh[k][j] != INVALID_HANDLE) IndicatorRelease(m_fh[k][j]);
+   }
+};
+
 CQBSignal *QB_CreateSignal(const ENUM_QB_FAMILY fam)
 {
    switch(fam)
@@ -210,6 +358,7 @@ CQBSignal *QB_CreateSignal(const ENUM_QB_FAMILY fam)
       case QB_ORB:           return new CSigOrb();
       case QB_KELTNER:       return new CSigKeltner();
       case QB_HOUR_MOMENTUM: return new CSigHourMomentum();
+      case QB_GENERIC:       return new CSigGeneric();
    }
    return NULL;
 }

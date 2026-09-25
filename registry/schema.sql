@@ -76,3 +76,14 @@ CREATE TABLE IF NOT EXISTS deployments (
     created     TEXT NOT NULL DEFAULT (datetime('now')),
     applied     TEXT
 );
+
+-- Generated strategy genomes (M4); family name = 'gen_' || id.
+CREATE TABLE IF NOT EXISTS genomes (
+    id          TEXT PRIMARY KEY,
+    genome      TEXT NOT NULL,      -- JSON (canonical)
+    description TEXT,
+    symbol      TEXT,               -- where it was discovered
+    timeframe   TEXT,
+    fitness     REAL,
+    created     TEXT NOT NULL DEFAULT (datetime('now'))
+);

@@ -96,3 +96,16 @@ def _js(o):
     if isinstance(o, np.bool_):
         return bool(o)
     return str(o)
+
+
+def save_genome(con, family: str, genome: dict, description: str, symbol: str, timeframe: str,
+                fitness: float) -> None:
+    con.execute("INSERT OR IGNORE INTO genomes(id, genome, description, symbol, timeframe, fitness) "
+                "VALUES (?,?,?,?,?,?)", (family.removeprefix("gen_"), json.dumps(genome, sort_keys=True),
+                                         description, symbol, timeframe, fitness))
+    con.commit()
+
+
+def get_genome(con, family: str) -> dict | None:
+    r = con.execute("SELECT genome FROM genomes WHERE id=?", (family.removeprefix("gen_"),)).fetchone()
+    return None if r is None else json.loads(r["genome"])

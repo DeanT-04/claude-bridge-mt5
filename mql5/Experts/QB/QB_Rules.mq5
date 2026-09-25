@@ -39,6 +39,17 @@ input int    InpKcPeriod  = 20;
 input double InpKcMult    = 1.5;
 input int    InpEntryHour = 10;
 input int    InpLookback  = 4;
+// --- generic family (QB_GENERIC)
+input int    InpTrig   = 0;
+input int    InpTrigP1 = 20;
+input double InpTrigP2 = 2.0;
+input int    InpInvert = 0;
+input int    InpF1     = 0;
+input int    InpF1P1   = 100;
+input double InpF1P2   = 1.0;
+input int    InpF2     = 0;
+input int    InpF2P1   = 100;
+input double InpF2P2   = 1.0;
 
 CTrade     g_trade;
 CQBSignal *g_sig = NULL;
@@ -55,6 +66,9 @@ int OnInit()
    p.or_start = InpOrStart; p.or_hours = InpOrHours;
    p.kc_period = InpKcPeriod; p.kc_mult = InpKcMult;
    p.entry_hour = InpEntryHour; p.lookback = InpLookback;
+   p.trig = InpTrig; p.trig_p1 = InpTrigP1; p.trig_p2 = InpTrigP2; p.invert = InpInvert;
+   p.f1 = InpF1; p.f1_p1 = InpF1P1; p.f1_p2 = InpF1P2;
+   p.f2 = InpF2; p.f2_p1 = InpF2P1; p.f2_p2 = InpF2P2;
    g_sig = QB_CreateSignal(InpFamily);
    if(g_sig == NULL || !g_sig.Init(_Symbol, _Period, p)) return INIT_FAILED;
    g_atr = iATR(_Symbol, _Period, InpAtrPeriod);

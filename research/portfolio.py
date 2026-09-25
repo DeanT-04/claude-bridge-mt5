@@ -13,7 +13,7 @@ from bridge import config
 
 from . import data
 from .gauntlet import _month_ts, costs_for
-from .strategies import FAMILIES
+from .strategies import FAMILIES, get_family
 
 DAY = 86400
 
@@ -26,7 +26,7 @@ def daily_r_matrix(sleeves: list[dict], years: float = 3.0) -> tuple[np.ndarray,
     """(days, R matrix [days x sleeves]) over the window every sleeve's data covers."""
     series, lo, hi = [], -math.inf, math.inf
     for s in sleeves:
-        fam = FAMILIES[s["family"]]
+        fam = get_family(s["family"])
         bars = data.bars(s["symbol"], s["timeframe"])
         # Stop where the gauntlet's holdout begins: allocation must not peek at it.
         end = _month_back(int(bars["time"][-1]), config.settings()["research"]["holdout_months"])

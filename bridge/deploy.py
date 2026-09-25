@@ -35,8 +35,8 @@ class Sleeve:
     max_spread: float = 0.0
 
     def line(self) -> str:
-        from research.strategies import FAMILIES
-        fid = FAMILIES[self.family].fid
+        from research.strategies import FAMILIES, get_family
+        fid = get_family(self.family).fid
         kv = {"id": self.id, "family": fid, "symbol": self.symbol, "tf": self.timeframe,
               "risk": f"{self.risk_pct:.4g}", "max_spread": f"{self.max_spread:g}"}
         kv.update({k: v for k, v in self.params.items() if k != "InpFamily"})
@@ -201,6 +201,15 @@ def apply(proposal_id: int, sha256: str, con=None) -> dict:
     con.commit()
     return {"applied": proposal_id, "target": r["target"], "version": r["version"],
             "path": str(config_path(r["target"]))}
+
+
+def reject_open(target: str, con=None) -> int:
+    """Mark every open proposal for a target as rejected (nothing is written to the terminal)."""
+    con = con or db.connect()
+    n = con.execute("UPDATE deployments SET status='rejected' WHERE target=? AND status='proposed'",
+                    (target,)).rowcount
+    con.commit()
+    return n
 
 
 def kill(target: str, reason: str = "", con=None) -> dict:
