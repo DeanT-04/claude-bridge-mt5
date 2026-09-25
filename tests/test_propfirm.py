@@ -19,13 +19,38 @@ def test_all_programs_load_with_size_ladders():
     p = propfirm.profiles()
     assert {"ftmo_2step", "ftmo_1step", "fundednext_stellar_2step", "fundednext_stellar_1step",
             "fundingpips_2step", "fundingpips_1step_flex", "the5ers_highstakes_2step",
-            "fxify_2phase", "fxify_1phase"} == set(p)
+            "the5ers_highstakes_2step_large", "the5ers_classic_2step", "the5ers_classic_2step_large",
+            "fxify_2phase", "fxify_2phase_classic", "fxify_2phase_pro", "fxify_1phase"} == set(p)
     for prog in p.values():
         sizes = prog.size_options()
-        assert sizes == sorted(sizes) and len(sizes) >= 5          # smallest -> largest
-        assert prog.default_size() in sizes
+        assert sizes == sorted(sizes) and len(sizes) >= 2          # smallest -> largest
+        assert prog.default_size() in prog.size_options(ea_only=True)
     assert p["ftmo_2step"].phase_targets == (10, 5) and p["ftmo_2step"].fee(50000) == 345
-    assert p["fxify_2phase"].trailing_locks_at_initial
+    assert p["fxify_2phase"].trailing_locks_at_initial and p["fxify_2phase"].min_trading_days == 5
+    assert p["fundednext_stellar_2step"].size_options(ea_only=True) == [6000, 15000, 25000]
+    assert p["fundingpips_2step"].news_blackout_min == 0 and p["fundingpips_2step"].daily_loss_ref == "baseline"
+    assert p["ftmo_1step"].trailing_basis == "eod_balance" and p["ftmo_1step"].fee_currency == "EUR"
+
+
+def test_baseline_daily_limit_scales_with_the_day_start():
+    # +20% days and -4.5% days: after gains, a -4.5% day exceeds 5% of the INITIAL balance but
+    # never 5% of the day's own starting balance
+    days = [np.array([20.0]), np.array([-4.5])]
+    kw = dict(phase_targets=(1000,), min_trading_days=0, max_total_dd_pct=90, max_days=40,
+              daily_loss_basis="balance")
+    init = propfirm.simulate(days, 1.0, prof(**kw), 0.01, runs=200)
+    base = propfirm.simulate(days, 1.0, prof(daily_loss_ref="baseline", **kw), 0.01, runs=200)
+    assert init["fail_breakdown"]["daily"] > 0.5 and base["fail_breakdown"]["daily"] == 0.0
+
+
+def test_eod_trailing_ignores_intraday_peaks():
+    # +8% then -9.5% within one day: an equity-trailing 10% floor (1.08 - 0.1) is hit,
+    # an end-of-day-balance floor (still 0.9) is not
+    day = [np.array([8.0, -9.5])]
+    kw = dict(max_dd_mode="trailing", max_daily_loss_pct=50, min_trading_days=0, max_days=1)
+    eq = propfirm.simulate(day, 1.0, prof(**kw), 0.01, runs=10)
+    eod = propfirm.simulate(day, 1.0, prof(trailing_basis="eod_balance", **kw), 0.01, runs=10)
+    assert eq["fail_breakdown"]["total"] == 1.0 and eod["fail_breakdown"]["total"] == 0.0
 
 
 def test_sure_winner_passes_and_sure_loser_fails():
@@ -122,5 +147,18 @@ def test_unoffered_size_is_refused(prop_env, monkeypatch):
 def test_demo_can_rehearse_a_program(prop_env):
     con, gid = prop_env
     cfg = deploy.propose("demo", add_gauntlets=[gid], prop_profile="fundednext_stellar_2step",
-                         prop_size=50000, con=con)["config"]
-    assert "prop_initial_balance=50000" in cfg and "max_daily_loss_pct=4" in cfg
+                         prop_size=25000, con=con)["config"]
+    assert "prop_initial_balance=25000" in cfg and "max_daily_loss_pct=4" in cfg
+    with pytest.raises(ValueError, match="EAs"):                        # FundedNext: EAs only up to 25K
+        deploy.propose("demo", add_gauntlets=[gid], prop_profile="fundednext_stellar_2step",
+                       prop_size=50000, con=con)
+
+
+def test_host_config_carries_firm_semantics(prop_env):
+    con, gid = prop_env
+    cfg = deploy.propose("demo", add_gauntlets=[gid], prop_profile="fxify_2phase", prop_size=50000,
+                         con=con)["config"]
+    assert "trailing_basis=balance" in cfg and "trailing_lock=1" in cfg and "daily_loss_ref=initial" in cfg
+    cfg = deploy.propose("demo", add_gauntlets=[gid], prop_profile="fundingpips_2step", prop_size=50000,
+                         con=con)["config"]
+    assert "daily_loss_ref=baseline" in cfg and "news_blackout_min=0" in cfg

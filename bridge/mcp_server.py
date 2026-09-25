@@ -379,6 +379,24 @@ def prop_combine(programs: list[str] | None = None, gauntlet_ids: list[int] | No
 
 
 @mcp.tool()
+def firm_costs(symbol: str) -> dict:
+    """What trading a BlackBull symbol costs at each prop firm (config/firmcosts.yaml): whether the
+    firm lists it, the spread ratio vs BlackBull and its source, commission, and total round-trip
+    cost in BlackBull points (vs BlackBull's own spread)."""
+    from research import data, firmcosts
+    return firmcosts.describe(symbol, data.spec(symbol))
+
+
+@mcp.tool()
+def record_spread_snapshot(firm: str, spreads: dict[str, float]) -> dict:
+    """Record a firm's PUBLISHED live spreads (firm symbol code -> spread in price units, e.g. read
+    from ftmo.com/en/symbols or fundednext.com/symbols) against BlackBull's live spreads now.
+    Snapshots set each firm's spread ratios in the gauntlet's firm-cost stage."""
+    from research import firmcosts
+    return firmcosts.record_snapshot(firm, spreads)
+
+
+@mcp.tool()
 def export_calendar() -> dict:
     """Refresh the high-impact news calendar history (used to backtest news blackouts) by running
     QB_ExportCalendar on the tester copy. Takes up to a minute; don't run during MT5 tests."""

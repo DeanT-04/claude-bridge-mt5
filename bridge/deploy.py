@@ -81,7 +81,10 @@ class Portfolio:
     prop_profile: str = ""
     prop_initial_balance: float = 0.0
     daily_loss_basis: str = "equity"
+    daily_loss_ref: str = "initial"
     max_dd_mode: str = "trailing"
+    trailing_basis: str = "equity"
+    trailing_lock: int = 0
     weekend_flat_hour: int = 0
     news_blackout_min: int = 0
     sleeves: list[Sleeve] = field(default_factory=list)
@@ -95,8 +98,9 @@ class Portfolio:
         if self.prop_profile:
             head += [f"# prop profile: {self.prop_profile}",
                      f"prop_initial_balance={self.prop_initial_balance:g}", f"daily_loss_basis={self.daily_loss_basis}",
-                     f"max_dd_mode={self.max_dd_mode}", f"weekend_flat_hour={self.weekend_flat_hour}",
-                     f"news_blackout_min={self.news_blackout_min}"]
+                     f"daily_loss_ref={self.daily_loss_ref}", f"max_dd_mode={self.max_dd_mode}",
+                     f"trailing_basis={self.trailing_basis}", f"trailing_lock={self.trailing_lock}",
+                     f"weekend_flat_hour={self.weekend_flat_hour}", f"news_blackout_min={self.news_blackout_min}"]
         return "\n".join(head + [s.line() for s in sorted(self.sleeves, key=lambda s: s.id)]) + "\n"
 
 
@@ -172,13 +176,19 @@ def apply_prop_profile(p: Portfolio, name: str, size: float | None = None) -> No
     size = size or target_size(p.target) or prof.default_size()
     if size not in prof.size_options():
         raise ValueError(f"{prof.firm} {prof.program} doesn't offer {size:.0f}; sizes: {prof.size_options()}")
+    if size not in prof.size_options(ea_only=True):
+        raise ValueError(f"{prof.firm} doesn't allow EAs on {size:.0f} accounts "
+                         f"(EA sizes: {prof.size_options(ea_only=True)}; {prof.ea_policy})")
     buf = config.settings()["deployment"].get("prop_safety_buffer", 0.8)
     p.prop_profile = name
     p.prop_initial_balance = size
     p.max_daily_loss_pct = round(prof.max_daily_loss_pct * buf, 3)
     p.max_total_dd_pct = round(prof.max_total_dd_pct * buf, 3)
     p.daily_loss_basis = prof.daily_loss_basis
+    p.daily_loss_ref = prof.daily_loss_ref
     p.max_dd_mode = prof.max_dd_mode
+    p.trailing_basis = prof.trailing_basis
+    p.trailing_lock = int(prof.trailing_locks_at_initial)
     p.weekend_flat_hour = prof.weekend_flat_hour
     p.news_blackout_min = prof.news_blackout_min
     p.balance_scale = 1.0

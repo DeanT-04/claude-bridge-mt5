@@ -23,11 +23,23 @@ prop rules. The phases below build on them.
   genetic, ML) and running under the prop gate.
 - Follow-ups: run `combine` once survivors exist; tune the gate thresholds on real survivors.
 
-## P2 — Firm realism (no trial accounts: BlackBull data + verified published figures)
-- Collect each firm's published spreads, commissions per lot and symbol lists from verified
-  sources (firm help centres, reputable reviews) into `config/propfirms.yaml` costs.
-- Per-firm cost stress in the gauntlet (commission + spread differences vs BlackBull).
-- Re-verify every `verify:` item and fee in `config/propfirms.yaml`.
+## P2 — Firm realism ✅ (2026-09-25; no trial accounts: BlackBull data + the firms' own pages)
+- ✅ Commissions, tradable symbols and leverage per firm in `config/firmcosts.yaml`, from firm
+  pages only (FTMO's public symbols JSON, FundedNext's and FundingPips' rule pages, The5ers'
+  asset page, FXIFY's FAQ).
+- ✅ Spread ratios vs BlackBull from the firms' published live spread tables (FTMO, FundedNext),
+  two snapshots each, in `config/spread_snapshots.jsonl`; `record_spread_snapshot` adds more.
+- ✅ Per-firm costs and cost stress in the gauntlet (`firm_costs` stage); the prop gate evaluates
+  each program on its own firm's trades and skips firms that don't list the symbol.
+- ✅ Every rule and fee re-verified: The5ers split by size (50K/100K are 4%/8%) and Classic added;
+  FXIFY Classic and Pro added, 5 min days; FTMO fees in EUR, 1-Step end-of-day trailing;
+  FundingPips has no news or weekend limits in evaluation and a baseline daily limit; FundedNext
+  EAs only up to 25K with a paid add-on. Simulator, host config and QB_Host support the new
+  semantics (baseline daily limit, balance/end-of-day trailing, lock).
+- Still open (`verify:` items): FundingPips 1-Step Flex fees, FundedNext 25K fee and EA add-on
+  price, The5ers and FXIFY symbol lists and non-FX commissions, FXIFY Classic/Pro phase order.
+- Follow-up: more spread snapshots in the London and New York sessions (the first two were taken
+  in the Asian session), e.g. a scheduled browser task.
 
 ## P3 — Strategy sourcing
 - Pipelines that turn research papers, YouTube transcripts and Instagram transcripts into

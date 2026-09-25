@@ -39,6 +39,9 @@ class Profile:
     sizes: tuple = field(default_factory=tuple)          # ({"size": 50000, "fee": 299}, ...)
     fee_currency: str = "USD"
     trailing_locks_at_initial: bool = False
+    trailing_basis: str = "equity"        # equity | balance (closed) | eod_balance (end-of-day high)
+    daily_loss_ref: str = "initial"       # the daily % applies to: initial balance | baseline (day start)
+    ea_max_size: float = 0                # largest size where EAs are allowed (0 = every size)
     min_profitable_days: int = 0
     profitable_day_pct: float = 0.0
     best_day_max_share: float = 0.0
@@ -50,8 +53,10 @@ class Profile:
     verify: tuple = field(default_factory=tuple)
     sources: tuple = field(default_factory=tuple)
 
-    def size_options(self) -> list[float]:
-        return [float(x["size"]) for x in self.sizes]
+    def size_options(self, ea_only: bool = False) -> list[float]:
+        """Sizes offered (ea_only: only those where the firm allows EAs, which is what we trade)."""
+        return [float(x["size"]) for x in self.sizes
+                if not (ea_only and self.ea_max_size and float(x["size"]) > self.ea_max_size)]
 
     def fee(self, size: float) -> float | None:
         """Fee for an account size (None if the size isn't offered or the fee is unpublished)."""
@@ -61,9 +66,10 @@ class Profile:
         return None
 
     def default_size(self) -> float:
-        """The research account size if offered, else the largest size not above it."""
+        """The research account size if offered (and EA-eligible), else the largest such size
+        not above it."""
         want = float(config.settings()["account"]["deposit"])
-        opts = sorted(self.size_options())
+        opts = sorted(self.size_options(ea_only=True))
         below = [x for x in opts if x <= want]
         return want if want in opts else (below[-1] if below else opts[0])
 
@@ -81,10 +87,10 @@ def profiles() -> dict[str, Profile]:
 
 
 def variant(profile: Profile) -> str:
-    """Execution-rule variant a program's trades must be generated under: 'base', or e.g.
-    'wf22_nb5' (flat from Friday 22:00, no entries within 5 min of high-impact news)."""
+    """Name of the trade set a program is evaluated on: its firm's execution costs plus its
+    weekend/news rules, e.g. 'ftmo', 'the5ers_nb2' ('base' is BlackBull's own costs)."""
     h, n = profile.weekend_flat_hour, profile.news_blackout_min
-    return "base" if not (h or n) else f"wf{h}_nb{n}"
+    return profile.firm.lower() + (f"_wf{h}" if h else "") + (f"_nb{n}" if n else "")
 
 
 def trade_days(trades: list[Trade]) -> list[np.ndarray]:
@@ -124,6 +130,8 @@ def simulate_grid(days: list[np.ndarray], active_share: float, profile: Profile,
 
     phase = np.zeros(shape, dtype=int)
     eq, bal, peak = np.ones(shape), np.ones(shape), np.ones(shape)
+    eod = p.trailing_basis == "eod_balance"      # floor from the highest end-of-day balance
+    eod_peak = np.ones(shape)
     traded, profitable, in_phase, elapsed = (np.zeros(shape, dtype=int) for _ in range(4))
     best, pos_sum = np.zeros(shape), np.zeros(shape)
     done = np.zeros(shape, dtype=bool)
@@ -136,7 +144,7 @@ def simulate_grid(days: list[np.ndarray], active_share: float, profile: Profile,
         if not live.any():
             break
         sod = {"balance": bal, "equity": eq, "max": np.maximum(bal, eq)}[p.daily_loss_basis]
-        floor_day = sod - dl
+        floor_day = sod - (dl * sod if p.daily_loss_ref == "baseline" else dl)
         start = eq.copy()
         act = live & (rng.random(runs) < active_share)[None, :]
         rows = mat[rng.integers(len(days), size=runs)]           # same day for every risk level
@@ -147,7 +155,7 @@ def simulate_grid(days: list[np.ndarray], active_share: float, profile: Profile,
             if p.max_dd_mode == "static":
                 floor_total = 1 - dd
             else:
-                floor_total = peak - dd
+                floor_total = (eod_peak if eod else peak) - dd
                 if p.trailing_locks_at_initial:
                     floor_total = np.minimum(floor_total, 1.0)
             hit_d = trading & (eq <= floor_day)
@@ -160,6 +168,7 @@ def simulate_grid(days: list[np.ndarray], active_share: float, profile: Profile,
         live &= ~done
         traded += act
         bal = np.where(act, eq, bal)                              # positions close within the day
+        eod_peak = np.maximum(eod_peak, bal)
         pnl = np.where(act, eq - start, 0.0)
         best = np.where(act & (pnl > 0), np.maximum(best, pnl), best)
         pos_sum += np.where(act & (pnl > 0), pnl, 0.0)
@@ -178,7 +187,7 @@ def simulate_grid(days: list[np.ndarray], active_share: float, profile: Profile,
         if nxt.any():
             phase[nxt] += 1
             elapsed[nxt] += in_phase[nxt]
-            for a in (eq, bal, peak):
+            for a in (eq, bal, peak, eod_peak):
                 a[nxt] = 1.0
             for a in (traded, profitable, in_phase):
                 a[nxt] = 0

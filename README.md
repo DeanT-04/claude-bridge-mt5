@@ -10,25 +10,49 @@ and 2-step evaluations at FTMO, FundedNext, FundingPips, The5ers and FXIFY, in e
 they offer. The roadmap is in [docs/PLAN.md](docs/PLAN.md).
 
 ## Prop programs modelled
-`config/propfirms.yaml` (researched 2026-09-25; **re-verify on the firm's site before buying**):
+`config/propfirms.yaml`. Every rule and fee was re-verified on the firms' own pages on 2026-09-25
+(P2). **Re-verify on the firm's site before buying.**
 
-| Program key | Firm | Targets | Daily loss | Max loss | Other rules | Sizes |
+| Program key | Firm | Targets | Daily loss | Max loss | Other rules | Sizes (fee) |
 |---|---|---|---|---|---|---|
-| `ftmo_2step` | FTMO | 10% → 5% | 5% (balance) | 10% static | 4 min days | 10K–200K |
-| `ftmo_1step` | FTMO | 10% | 3% | 10% trailing | best day ≤ 50% | 10K–200K |
-| `fundednext_stellar_2step` | FundedNext | 8% → 5% | 5% | 10% static | 5 min days | 6K–200K |
-| `fundednext_stellar_1step` | FundedNext | 10% | 3% | 6% static | 2 min days | 6K–200K |
-| `fundingpips_2step` | FundingPips | 8% → 5% | 5% (higher of bal/eq) | 10% static | 3 min days, news 5 min, Fri flat | 5K–100K |
-| `fundingpips_1step_flex` | FundingPips | 12% | 3% | 12% static | news 5 min, Fri flat | 5K–100K |
-| `the5ers_highstakes_2step` | The5ers | 10% → 5% | 5% | 10% static | 3 profitable days ≥ 0.5% | 2.5K–100K |
-| `fxify_2phase` | FXIFY | 10% → 5% | 4% | 10% trailing, locks at start | EA approval required | 5K–400K |
-| `fxify_1phase` | FXIFY | 10% | 3% | 6% trailing, locks at start | EA approval required | 5K–200K |
+| `ftmo_2step` | FTMO | 10% → 5% | 5% of initial (balance) | 10% static | 4 min days | 10K–200K (€89–€1,080) |
+| `ftmo_1step` | FTMO | 10% | 3% of initial (balance) | 10% trailing end-of-day balance | best day ≤ 50% | 10K–200K (€79–€999) |
+| `fundednext_stellar_2step` | FundedNext | 8% → 5% | 5% of initial | 10% static | 5 min days; **EAs ≤ 25K, paid add-on** | 6K–200K ($49.99–$1,049.99) |
+| `fundednext_stellar_1step` | FundedNext | 10% | 3% of initial | 6% static | 2 min days; **EAs ≤ 25K, paid add-on** | 6K–200K |
+| `fundingpips_2step` | FundingPips | 8% → 5% | 5% of the day's higher bal/eq | 10% static | 3 min days | 5K–100K ($36–$522) |
+| `fundingpips_1step_flex` | FundingPips | 12% | 3% of the day's higher bal/eq | 12% static | none | 5K–100K |
+| `the5ers_highstakes_2step` | The5ers | 10% → 5% | 5% of the day's higher bal/eq | 10% static | 3 profitable days ≥ 0.5%, news ±2 min | 2.5K–25K ($19–$176) |
+| `the5ers_highstakes_2step_large` | The5ers | 10% → 5% | 4% | 8% static | same | 50K, 100K ($249, $405) |
+| `the5ers_classic_2step` | The5ers | 8% → 5% | 5% | 10% static | same | 2.5K–25K ($22–$195) |
+| `the5ers_classic_2step_large` | The5ers | 8% → 5% | 4% | 8% static | same | 50K, 100K ($279, $455) |
+| `fxify_2phase` | FXIFY | 10% → 5% | 4% of initial | 10% trailing closed balance, locks at start | 5 min days; EA pre-approval | 5K–400K ($59–$2,950) |
+| `fxify_2phase_classic` | FXIFY | 10% → 5% | 4% | 10% static | 4 min days; EA pre-approval | 5K–100K |
+| `fxify_2phase_pro` | FXIFY | 8% → 4% | 4% | 8% static | 3 min days; EA pre-approval | 10K–250K ($129–$1,350) |
+| `fxify_1phase` | FXIFY | 10% | 3% | 6% trailing closed balance, locks at start | 5 min days; EA pre-approval | 5K–400K |
 
-Every program lists all its sizes (smallest → largest) with fees where published
-(`python scripts/research.py programs`). Rules are percentage-based, so pass probabilities hold for
-any size; the size sets the fee and minimum-lot limits. Every firm allows EAs on MT5 with
-conditions (in `ea_policy`). All five were chosen by Trustpilot review volume; FXIFY replaces The
-Funded Trader (2.9★).
+`python scripts/research.py programs` lists every size and fee. Rules are percentage-based, so pass
+probabilities hold for any size; the size sets the fee. Sizes where a firm bans EAs are listed but
+never proposed, ranked or deployed (`ea_max_size`). All five firms were chosen by Trustpilot review
+volume; FXIFY replaces The Funded Trader (2.9★). No firm restricts news trading or weekend holds
+during evaluation, except The5ers' ±2-minute news window.
+
+**Firm costs** (`config/firmcosts.yaml`, `research/firmcosts.py`). Each firm's commissions and
+tradable symbols come from its own pages:
+
+| Firm | FX | Metals | Oil | Indices | Crypto | Symbols listed |
+|---|---|---|---|---|---|---|
+| FTMO | $5/lot RT | 0.0014% RT | 0 | 0 | 0.065% RT | 85 (public JSON) |
+| FundedNext | $5/side | 0.0016%/side | $5/side | 0 | 0.04%/side | 70 |
+| FundingPips | $5/lot | $5/lot | 0 | 0 | 0.04% | 41 |
+| The5ers | $4/lot RT | $4 (assumed) | spread only | spread only | spread only | not public |
+| FXIFY (Raw) | $6/lot RT | $6 | unknown | unknown | unknown | not public |
+
+Spreads are BlackBull's bar spreads × a per-symbol ratio. The ratio comes from snapshots of the
+firm's **published live spread table** (FTMO, FundedNext), paired with BlackBull's live spread at the
+same moment (`config/spread_snapshots.jsonl`). Firms without a public table use the raw-spread
+firms' median per asset class. For symbols the firms don't list publicly, only symbols that two of
+the public lists share are used. Round-trip cost vs BlackBull (points; `research.py costs SYMBOL`):
+EURUSD 7–11 vs 11, XAUUSD 50–59 vs 22, NAS100 12–21 vs 12, BTCUSD 975–8,983 vs 1,300.
 
 ## How it fits together
 ```
@@ -63,6 +87,7 @@ python scripts/setup_terminal.py tester        # portable Strategy Tester copy
 runtime\tester\terminal64.exe /portable        # once: log into a BlackBull demo (save password)
 python scripts/research.py scan                # symbol universe
 python scripts/research.py calendar            # news calendar history (for news-blackout backtests)
+python scripts/research.py costs XAUUSD        # per-firm spreads and commissions for a symbol
 ```
 
 ## Research
@@ -96,11 +121,13 @@ python scripts/parity_check.py XAUUSD H1 2024-01-01 2024-07-01 [families]
 5. Sizing: fractional Kelly with a Monte Carlo drawdown check.
 6. Cost stress: 1.5× spread plus slippage.
 7. Benchmarks: beat random entries and buy-and-hold.
-8. **Prop gate:** every program is simulated on the walk-forward out-of-sample trades at its
-   P(pass)-maximising risk. Firms with weekend or news rules get the OOS trades regenerated under
-   those rules first. At least one program must reach P(pass) ≥ 0.6 **and** beat the same trades
-   with their edge removed (de-meaned R) by ≥ 0.2. Luck alone passes 20–33% of challenges. The
-   OOS trades are stored per rule variant (`oos_trades` table) for the leaderboard and combiner.
+8. **Firm costs and prop gate:** the walk-forward out-of-sample trades are regenerated for each
+   firm, with its spreads, commissions and each program's weekend/news rules. A firm must keep a
+   profit factor ≥ 1.1 under its own cost stress (1.5× spread plus slippage). Firms that don't
+   list the symbol are skipped. Every program is then simulated at its P(pass)-maximising risk. At
+   least one program must reach P(pass) ≥ 0.6 **and** beat the same trades with their edge removed
+   (de-meaned R) by ≥ 0.2. Luck alone passes 20–33% of challenges. The OOS trades are stored per
+   firm variant (`oos_trades` table) for the leaderboard and combiner.
 9. One-shot 12-month holdout.
 10. MT5 parity and cost stress in the real Strategy Tester.
 
@@ -113,6 +140,8 @@ every phase, and models:
 - minimum trading days and minimum profitable days
 - the best-day rule
 - time limits
+- daily limits as a % of the initial balance or of the day's own baseline (FundingPips, The5ers)
+- trailing floors on equity, closed balance or the end-of-day balance high (FTMO 1-Step)
 - weekend flattening and news blackouts, in the execution engine (the trades themselves change)
 
 It is vectorised over runs × risk levels, and every risk level sees the same bootstrapped days.
@@ -137,7 +166,7 @@ Each prop account gets its **own portable terminal** (`terminals.<name>` in `set
 from one chart and enforces, inside the EA:
 - the config's account type must match the terminal's
 - the firm's daily and total limits, tightened by `prop_safety_buffer` (0.8), with the firm's
-  basis and static/trailing mode
+  basis, daily reference, static/trailing mode, trailing basis and lock
 - weekend flattening and a high-impact news blackout (MT5 calendar)
 - an open-risk cap, a spread filter, and closing positions of removed sleeves
 - orders rejected at session open ("Market closed") are retried within the same bar
@@ -156,22 +185,22 @@ Panic stop without Python or Claude:
 Only gauntlet-validated sleeves may go to a prop account; unvalidated sleeves are demo-only.
 
 ## MCP server
-`.mcp.json` → `python -m bridge.mcp_server`. 32 tools:
+`.mcp.json` → `python -m bridge.mcp_server`. 34 tools:
 - **data:** `account_info`, `list_symbols`, `symbol_spec`, `get_bars`, `universe`, `scan_universe`
 - **tester:** `compile_expert`, `run_backtest`, `run_optimization`
 - **research:** `run_gauntlet`, `enqueue_research`, `enqueue_ml`, `start_research`,
   `research_status`, `research_survivors`, `list_gauntlets`, `get_gauntlet`
 - **prop:** `prop_profiles`, `prop_simulate`, `prop_rank`, `prop_leaderboard`, `prop_combine`,
-  `export_calendar`, `prop_preflight`
+  `firm_costs`, `record_spread_snapshot`, `export_calendar`, `prop_preflight`
 - **deployment:** `install_host`, `portfolio_allocation`, `propose_deployment`, `apply_deployment`,
   `kill_switch`, `deployment_status`, `forward_test_report`, `promote`
 
 No tool places orders directly.
 
 ## Tests
-`python -m pytest`: 72 tests (engine and prop execution rules, indicators, families, genetic
-operators, stats, tester ini/parsing, deployment, prop simulator, gate, leaderboard, combiner,
-calendar, queue).
+`python -m pytest`: 81 tests (engine and prop execution rules, indicators, families, genetic
+operators, stats, tester ini/parsing, deployment, prop simulator and firm rule semantics, firm
+costs, gate, leaderboard, combiner, calendar, queue).
 
 ## Findings and gotchas
 - **History understates spreads.** BTCUSD records a spread of 0 on 57% of H1 bars; XAUUSD history
@@ -189,6 +218,13 @@ calendar, queue).
   trend-following on alt-coins, SPX500 and USDJPY. None survived the multiple-testing correction.
 - **In-sample optimism.** Tuned-parameter backtests look much better than walk-forward OOS. Since
   P1, prop and portfolio tools use the stored OOS trades.
+- **Firm costs differ by asset class.** Raw-spread firms are cheaper than BlackBull's spread-only
+  account on FX, but gold costs about twice as much at every firm. Crypto commissions (% of
+  notional) make BTC 4–7× dearer at FTMO and FundedNext.
+- **Firm rules found in P2.** FundedNext allows EAs only on accounts up to 25K, with a paid add-on.
+  FundingPips' news and weekend limits apply only to funded accounts, and its daily limit is a %
+  of the day's baseline. FTMO 1-Step trails the end-of-day balance, not equity. The5ers' 50K and
+  100K High Stakes accounts have 4%/8% limits. FXIFY needs 5 minimum trading days.
 - **P(pass) without edge.** A zero-edge strategy at its best risk passes 20–33% of these
   challenges. That is why the gate also requires lift over the de-meaned baseline.
 - **Weekend flat vs early market close.** When a market closes before the flat hour, QB_Host gets

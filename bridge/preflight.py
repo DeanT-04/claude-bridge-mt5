@@ -43,7 +43,7 @@ def preflight(target: str, con=None) -> dict:
     prof = profiles().get(profile_name)
     checks.append(_check("prop profile configured", prof is not None,
                          profile_name or "set terminals.<target>.profile"))
-    if prof and "approval" in prof.ea_policy.lower():
+    if prof and any(k in prof.ea_policy.lower() for k in ("approval", "add-on")):   # FXIFY, FundedNext
         approved = bool(s["terminals"][target].get("ea_approved"))
         checks.append(_check(f"{prof.firm}: EA approval obtained", approved,
                              f"{prof.ea_policy}. Get it in writing, then set terminals.{target}.ea_approved: true"))

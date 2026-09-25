@@ -171,9 +171,10 @@ def _strip(res: dict) -> dict:
 def leaderboard(program: str | None = None, size: float | None = None, min_pass_prob: float = 0.0,
                 verdicts: tuple = SURVIVOR_VERDICTS, portfolios: bool = True, limit: int = 50,
                 con=None) -> list[dict]:
-    """Every (strategy or portfolio) x program x account size, best first: P(pass) (rules are %,
-    so it's the same for every size), lift, the P(pass)-maximising risk, median days, and the
-    size's fee and expected cost per pass. Strategies use their gauntlet's prop stage."""
+    """Every (strategy or portfolio) x program x account size where the firm allows EAs, best
+    first: P(pass) (rules are %, so it's the same for every size), lift, the P(pass)-maximising
+    risk, median days, and the size's fee and expected cost per pass. Strategies use their
+    gauntlet's prop stage (firm costs and rules included)."""
     con = con or db.connect()
     progs = propfirm.profiles()
     entries = []
@@ -182,6 +183,8 @@ def leaderboard(program: str | None = None, size: float | None = None, min_pass_
     for r in con.execute(q, verdicts):
         st = json.loads(r["stages"]).get("prop", {})
         for p in st.get("programs", []):
+            if p.get("offered") is False:
+                continue
             entries.append({"kind": "strategy", "id": r["id"], "verdict": r["verdict"],
                             "name": f"{r['family']} {r['symbol']} {r['timeframe']}", "program": p["profile"],
                             "pass_prob": p["pass_prob"], "lift": p.get("lift"), "risk_pct": p["risk_pct"],
@@ -202,8 +205,9 @@ def leaderboard(program: str | None = None, size: float | None = None, min_pass_
         if (program and e["program"] != program) or e["pass_prob"] < min_pass_prob or e["program"] not in progs:
             continue
         prof = progs[e["program"]]
-        for sz in ([size] if size else prof.size_options()):
-            if float(sz) not in prof.size_options():
+        eligible = prof.size_options(ea_only=True)             # sizes where the firm allows EAs
+        for sz in ([size] if size else eligible):
+            if float(sz) not in eligible:
                 continue
             fee = prof.fee(sz)
             rows.append({**e, "firm": prof.firm, "size": sz, "fee": fee, "fee_currency": prof.fee_currency,

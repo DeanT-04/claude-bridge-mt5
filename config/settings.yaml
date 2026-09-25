@@ -22,7 +22,7 @@ terminals:
   #   account_mode: demo          # most challenge accounts are demo-mode on the firm's server
   #   profile: ftmo_2step         # program key in config/propfirms.yaml
   #   size: 50000                 # one of that program's sizes
-  #   ea_approved: false          # firms that require EA approval (FXIFY): set true once granted
+  #   ea_approved: false          # FXIFY (written approval) / FundedNext (EA add-on): true once you have it
 
 tester:
   # Portable copy used exclusively for Strategy Tester runs (scripts/setup_terminal.py tester).

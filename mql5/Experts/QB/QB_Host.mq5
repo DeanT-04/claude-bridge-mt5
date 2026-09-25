@@ -93,7 +93,10 @@ int       g_reset_halt = 0;
 // prop-firm rules (all optional; 0/"" = off)
 double    g_prop_initial = 0;          // limits become % of this initial balance
 string    g_daily_basis = "equity";    // start-of-day reference: balance | equity | max
+string    g_daily_ref = "initial";     // daily limit is % of: initial (prop_initial_balance) | baseline (day start)
 string    g_dd_mode = "trailing";      // trailing (from peak) | static (from prop_initial_balance)
+string    g_trail_basis = "equity";    // trailing peak: equity | balance | eod_balance (end-of-day high)
+int       g_trail_lock = 0;            // 1 = the trailing floor stops rising at prop_initial_balance
 int       g_weekend_flat_hour = 0;     // Friday server hour to flatten; blocks entries until Monday
 int       g_news_min = 0;              // no entries within +/- N min of high-impact news
 // state
@@ -177,6 +180,7 @@ bool LoadConfig()
    g_version = 0; g_enabled = false; g_account = ""; g_scale = 1.0;
    g_max_daily = 0; g_max_dd = 0; g_max_open = 0; g_reset_halt = 0; g_error = "";
    g_prop_initial = 0; g_daily_basis = "equity"; g_dd_mode = "trailing"; g_weekend_flat_hour = 0; g_news_min = 0;
+   g_daily_ref = "initial"; g_trail_basis = "equity"; g_trail_lock = 0;
    while(!FileIsEnding(h))
    {
       string line = FileReadString(h);
@@ -196,6 +200,9 @@ bool LoadConfig()
       else if(key == "prop_initial_balance") g_prop_initial = StringToDouble(val);
       else if(key == "daily_loss_basis") g_daily_basis = val;
       else if(key == "max_dd_mode") g_dd_mode = val;
+      else if(key == "daily_loss_ref") g_daily_ref = val;
+      else if(key == "trailing_basis") g_trail_basis = val;
+      else if(key == "trailing_lock") g_trail_lock = (int)StringToInteger(val);
       else if(key == "weekend_flat_hour") g_weekend_flat_hour = (int)StringToInteger(val);
       else if(key == "news_blackout_min") g_news_min = (int)StringToInteger(val);
       else if(key == "sleeve")
@@ -309,9 +316,12 @@ bool RiskGate()
    {
       double sod = g_daily_basis == "balance" ? bal : (g_daily_basis == "max" ? MathMax(bal, eq) : eq);
       GvSet("day", today); GvSet("day_start", sod); GvSet("halted_today", 0);
+      GvSet("peak_eod", MathMax(GvGet("peak_eod", g_prop_initial > 0 ? g_prop_initial : bal), bal));
    }
    double peak = MathMax(GvGet("peak", eq), eq);
    GvSet("peak", peak);
+   double peak_bal = MathMax(GvGet("peak_bal", bal), bal);
+   GvSet("peak_bal", peak_bal);
 
    if(!g_enabled)
    {
@@ -322,8 +332,9 @@ bool RiskGate()
    if(GvGet("halted_today", 0) > 0) return false;
 
    double day_start = GvGet("day_start", eq);
-   // Prop rules measure limits as % of the initial balance; otherwise % of the reference itself.
-   double daily_base = g_prop_initial > 0 ? g_prop_initial : day_start;
+   // Prop rules measure limits as % of the initial balance (unless the firm uses the day's own
+   // baseline); otherwise % of the reference itself.
+   double daily_base = (g_prop_initial > 0 && g_daily_ref != "baseline") ? g_prop_initial : day_start;
    if(g_max_daily > 0 && eq <= day_start - daily_base * g_max_daily / 100.0)
    {
       GvSet("halted_today", 1);
@@ -332,7 +343,14 @@ bool RiskGate()
    }
    double floor;
    if(g_dd_mode == "static" && g_prop_initial > 0) floor = g_prop_initial * (1 - g_max_dd / 100.0);
-   else floor = peak - (g_prop_initial > 0 ? g_prop_initial : peak) * g_max_dd / 100.0;
+   else
+   {
+      double top = peak;
+      if(g_trail_basis == "balance") top = peak_bal;
+      else if(g_trail_basis == "eod_balance") top = MathMax(GvGet("peak_eod", g_prop_initial), g_prop_initial);
+      floor = top - (g_prop_initial > 0 ? g_prop_initial : top) * g_max_dd / 100.0;
+      if(g_trail_lock && g_prop_initial > 0) floor = MathMin(floor, g_prop_initial);
+   }
    if(g_max_dd > 0 && eq <= floor)
    {
       GvSet("halted", 1);

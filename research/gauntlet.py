@@ -227,21 +227,42 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
 
     # ---- 7. prop challenges (gate) -------------------------------------------------------
     # Uses the walk-forward OOS trades, never the tuned final params, so it isn't in-sample.
-    # Firms with weekend/news rules get the OOS trades regenerated under those rules.
+    # Each firm's trades are regenerated with its own costs (config/firmcosts.yaml) and each
+    # program's weekend/news rules; a firm must also survive its own cost stress.
     oos = {"base": oos_trades}
     span = (int(times[windows[0].is_end]), int(times[windows[-1].oos_end - 1]))
     if all_pass:
-        from . import propfirm
+        from . import firmcosts, propfirm
+
+        def regen(c, blocked=None, flat=None):
+            out = []
+            for w, p in picked:
+                d, sl, tp = sigs(p)
+                out += simulate(bars, d, sl, tp, p.InpMaxBars, c, w.is_end, w.oos_end,
+                                blocked=blocked, flat_at=flat)
+            return out
+
+        firm_rows = {}
         for prof in propfirm.profiles().values():
             v = propfirm.variant(prof)
-            if v not in oos:
-                blocked, flat = execution_rules(bars, symbol, spec, prof.weekend_flat_hour, prof.news_blackout_min)
-                oos[v] = []
-                for w, p in picked:
-                    d, sl, tp = sigs(p)
-                    oos[v] += simulate(bars, d, sl, tp, p.InpMaxBars, costs, w.is_end, w.oos_end,
-                                       blocked=blocked, flat_at=flat)
-        stages["prop"] = prop_gate(oos, oos_span, g["prop"])
+            if v in oos or v in firm_rows:
+                continue
+            fc = firmcosts.costs(prof.firm, symbol, spec)
+            if fc is None:
+                firm_rows[v] = {"firm": prof.firm, "offered": False, "pass": False}
+                continue
+            blocked, flat = execution_rules(bars, symbol, spec, prof.weekend_flat_hour, prof.news_blackout_min)
+            oos[v] = regen(fc, blocked, flat)
+            stressed = regen(firmcosts.costs(prof.firm, symbol, spec, cs["spread_mult"], cs["extra_slippage_points"]),
+                             blocked, flat)
+            fm = stats.metrics(oos[v], span_days=oos_span)
+            spf = stats.metrics(stressed, span_days=oos_span)["profit_factor"]
+            firm_rows[v] = {"firm": prof.firm, "offered": True, "pass": spf >= cs["min_profit_factor"],
+                            "profit_factor": fm["profit_factor"], "expectancy_r": fm["expectancy_r"],
+                            "sharpe": fm["sharpe"], "stressed_profit_factor": spf}
+        stages["firm_costs"] = {"pass": any(r["pass"] for r in firm_rows.values()), "variants": firm_rows}
+        stages["prop"] = prop_gate(oos, oos_span, g["prop"],
+                                   {v: r["pass"] for v, r in firm_rows.items()})
         all_pass = stages["prop"]["pass"]
 
     # ---- 8. holdout (once per candidate, only if everything else passed) ---------------
@@ -290,25 +311,33 @@ def execution_rules(bars, symbol: str, spec: dict, flat_hour: int, news_min: int
     return blocked, flat
 
 
-def prop_gate(oos: dict[str, list[Trade]], span_days: float, cfg: dict) -> dict:
+def prop_gate(oos: dict[str, list[Trade]], span_days: float, cfg: dict,
+              cost_ok: dict[str, bool] | None = None) -> dict:
     """Evaluate every program on its variant's OOS trades; pass if any program clears both
-    min_pass_prob and min_lift."""
+    min_pass_prob and min_lift (and its firm passed cost stress). Programs whose firm doesn't
+    list the symbol are reported as not offered."""
     from . import propfirm
     progs = propfirm.profiles()
     names = list(progs) if cfg.get("programs", "all") == "all" else cfg["programs"]
     rows = []
     for n in names:
         prof = progs[n]
-        tr = oos[propfirm.variant(prof)]
+        v = propfirm.variant(prof)
+        if v not in oos:
+            rows.append({"profile": n, "pass": False, "offered": False, "pass_prob": 0.0, "lift": 0.0,
+                         "variant": v})
+            continue
+        tr = oos[v]
         days = propfirm.trade_days(tr)
         active = min(len(days) / max(span_days * 5 / 7, 1), 1.0)
         e = propfirm.evaluate(days, active, prof, runs=cfg["runs"])
-        ok = e["best"]["pass_prob"] >= cfg["min_pass_prob"] and e["lift"] >= cfg["min_lift"]
-        rows.append({"profile": n, "pass": ok, "pass_prob": e["best"]["pass_prob"], "lift": e["lift"],
+        stress_ok = (cost_ok or {}).get(v, True)
+        ok = e["best"]["pass_prob"] >= cfg["min_pass_prob"] and e["lift"] >= cfg["min_lift"] and stress_ok
+        rows.append({"profile": n, "pass": ok, "offered": True, "cost_stress_ok": stress_ok, "pass_prob": e["best"]["pass_prob"], "lift": e["lift"],
                      "baseline_pass_prob": e["baseline_pass_prob"], "risk_pct": e["best"]["risk_pct"],
                      "median_days": e["best"]["median_days_to_pass"],
                      "fail_breakdown": e["best"]["fail_breakdown"], "trades": len(tr),
-                     "variant": propfirm.variant(prof)})
+                     "variant": v})
     rows.sort(key=lambda r: (r["pass"], r["pass_prob"]), reverse=True)
     return {"pass": any(r["pass"] for r in rows), "min_pass_prob": cfg["min_pass_prob"],
             "min_lift": cfg["min_lift"], "programs": rows}

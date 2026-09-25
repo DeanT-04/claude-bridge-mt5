@@ -11,6 +11,7 @@ python scripts/research.py programs                               # prop program
 python scripts/research.py leaderboard [--program ftmo_2step] [--size 50000] [--limit 30]
 python scripts/research.py combine [--programs ftmo_2step,...] [--max-sleeves 5]
 python scripts/research.py calendar                               # refresh the news calendar
+python scripts/research.py costs XAUUSD                           # per-firm costs for a symbol
 
 --symbols takes researchable, core, or a comma list (EURUSD,XAUUSD).
 """
@@ -58,6 +59,7 @@ def main():
     cb = sub.add_parser("combine")
     cb.add_argument("--programs"); cb.add_argument("--ids")
     cb.add_argument("--max-sleeves", type=int, default=5); cb.add_argument("--max-corr", type=float, default=0.5)
+    fc = sub.add_parser("costs"); fc.add_argument("symbol")
     for name in ("status", "survivors", "confirm", "programs", "calendar"):
         sub.add_parser(name)
     a = ap.parse_args()
@@ -116,6 +118,14 @@ def main():
         from research import challenge
         challenge.combine(a.programs.split(",") if a.programs else None,
                           [int(x) for x in a.ids.split(",")] if a.ids else None, a.max_sleeves, a.max_corr)
+    elif a.cmd == "costs":
+        from research import data, firmcosts
+        for firm, r in firmcosts.describe(a.symbol, data.spec(a.symbol)).items():
+            if not r["offered"]:
+                print(f"{firm:12} not listed")
+                continue
+            print(f"{firm:12} spread x{r['spread_ratio']:<5} ({r['spread_source']}) + commission "
+                  f"{r['commission_points']:g} pts = {r['total_points']:g} pts vs BlackBull {r['blackbull_points']:g}")
     elif a.cmd == "calendar":
         from research import calendar
         print(json.dumps(calendar.export(), indent=1))
@@ -124,8 +134,9 @@ def main():
         for k, p in propfirm.profiles().items():
             sizes = ", ".join(f"{x['size'] / 1000:g}K" + (f" {p.fee_currency} {x['fee']:g}" if x.get("fee") else "")
                               for x in p.sizes)
-            print(f"{k:26} {p.firm:11} {p.program:34} targets {list(p.phase_targets)} "
-                  f"daily {p.max_daily_loss_pct}% max {p.max_total_dd_pct}% {p.max_dd_mode}\n{'':26} sizes: {sizes}")
+            ea = f"  (EAs up to {p.ea_max_size / 1000:g}K)" if p.ea_max_size else ""
+            print(f"{k:30} {p.firm:11} {p.program:40} targets {list(p.phase_targets)} "
+                  f"daily {p.max_daily_loss_pct}% max {p.max_total_dd_pct}% {p.max_dd_mode}\n{'':30} sizes: {sizes}{ea}")
 
 
 if __name__ == "__main__":

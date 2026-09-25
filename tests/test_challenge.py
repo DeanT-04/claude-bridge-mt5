@@ -32,7 +32,7 @@ def con(tmp_path, monkeypatch):
 
 def add(con, name, tr, verdict="pass", prop=None):
     gid = db.log_gauntlet(con, name, "EURUSD", "H1", {}, verdict, {"prop": prop or {}})
-    for v in ("base", "wf22_nb5", "wf0_nb2"):
+    for v in ("base", "ftmo", "fundednext", "fundingpips", "the5ers_nb2", "fxify"):
         db.save_oos_trades(con, gid, v, (T0, T0 + 700 * DAY), tr)
     return gid
 
@@ -48,8 +48,8 @@ def test_oos_trades_roundtrip(con):
 
 def test_variant_names():
     p = propfirm.profiles()
-    assert propfirm.variant(p["ftmo_2step"]) == "base"
-    assert propfirm.variant(p["fundingpips_2step"]) == "wf22_nb5"
+    assert propfirm.variant(p["ftmo_2step"]) == propfirm.variant(p["ftmo_1step"]) == "ftmo"
+    assert propfirm.variant(p["the5ers_highstakes_2step"]) == "the5ers_nb2"
 
 
 def test_lift_separates_edge_from_luck():
@@ -64,10 +64,14 @@ def test_lift_separates_edge_from_luck():
 
 def test_prop_gate_needs_probability_and_lift():
     cfg = {"programs": ["ftmo_2step"], "runs": 400, "min_pass_prob": 0.6, "min_lift": 0.2}
-    good = gauntlet.prop_gate({"base": trades(2, 0.2)}, 700, cfg)
-    bad = gauntlet.prop_gate({"base": trades(2, -0.05)}, 700, cfg)
+    good = gauntlet.prop_gate({"ftmo": trades(2, 0.2)}, 700, cfg)
+    bad = gauntlet.prop_gate({"ftmo": trades(2, -0.05)}, 700, cfg)
     assert good["pass"] and good["programs"][0]["lift"] >= 0.2
     assert not bad["pass"]
+    stressed_out = gauntlet.prop_gate({"ftmo": trades(2, 0.2)}, 700, cfg, {"ftmo": False})
+    assert not stressed_out["pass"] and not stressed_out["programs"][0]["cost_stress_ok"]
+    missing = gauntlet.prop_gate({}, 700, cfg)                       # the firm does not list the symbol
+    assert not missing["pass"] and missing["programs"][0]["offered"] is False
 
 
 def test_combiner_skips_correlated_and_improves_pass_prob(con):

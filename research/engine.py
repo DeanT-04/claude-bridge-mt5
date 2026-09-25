@@ -26,6 +26,7 @@ class Costs:
     spread_mult: float = 1.0
     slippage_points: float = 0.0   # adverse, applied to entry and exit
     commission_price: float = 0.0  # round-trip commission expressed in price units
+    commission_rate: float = 0.0   # round-trip commission as a fraction of the entry price (% of notional)
     # Broker history understates spreads (BTCUSD records 0 on most bars; XAUUSD 12 vs 22 live),
     # so each bar is charged at least this many points.
     min_spread_points: float = 0.0
@@ -116,7 +117,7 @@ def simulate(bars: np.ndarray, direction: np.ndarray, sl_dist: np.ndarray, tp_di
 
 
 def _close(e_i, x_i, t, pos, e_px, x_px, sd, costs: Costs, why) -> Trade:
-    x_px -= pos * costs.commission_price
+    x_px -= pos * (costs.commission_price + costs.commission_rate * e_px)
     return Trade(e_i, x_i, int(t[e_i]), int(t[x_i]), pos, e_px, x_px, sd, why)
 
 
