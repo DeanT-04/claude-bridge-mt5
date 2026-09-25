@@ -1,0 +1,17 @@
+# CME contract specs (from CME Group contract specifications) and the free proxy feeds used for
+# history. Proxy fidelity is measured, not assumed: see `propquant data tracking`.
+instruments:
+  NQ:
+    name: E-mini Nasdaq-100
+    tick_size: 0.25
+    point_value: 20.0
+    micro: {symbol: MNQ, point_value: 2.0}
+    proxy: {source: dukascopy, instrument: "USATECH.IDX/USD"}
+    futures: {source: yfinance, ticker: "NQ=F"}
+  ES:
+    name: E-mini S&P 500
+    tick_size: 0.25
+    point_value: 50.0
+    micro: {symbol: MES, point_value: 5.0}
+    proxy: {source: dukascopy, instrument: "USA500.IDX/USD"}
+    futures: {source: yfinance, ticker: "ES=F"}

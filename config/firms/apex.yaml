@@ -1,0 +1,110 @@
+# Apex Trader Funding: current (non-legacy) Evaluation + Performance Account (PA) rules.
+#
+# apextraderfunding.com blocks automated readers (Cloudflare 403), so the rules were read from
+# Internet Archive captures of Apex's own help-center pages (capture timestamps in `sources`).
+# Every rule below cites a source key. Re-verify before trusting results: prices change often
+# and Apex runs frequent discounts (EV is computed at LIST price, i.e. conservatively).
+firm: apex
+name: Apex Trader Funding
+verified_on: 2026-09-25
+platform: rithmic   # Rithmic/WealthCharts: eval threshold stops trailing at the target balance.
+
+sources:
+  eod_eval: {url: "https://apextraderfunding.com/help-center/eod-trailing-drawdown-accounts/eod-evaluations/", capture: "20260325193319"}
+  eod_drawdown: {url: "https://apextraderfunding.com/help-center/eod-trailing-drawdown-accounts/eod-drawdown-explained/", capture: "20260325193331"}
+  eod_pa: {url: "https://apextraderfunding.com/help-center/eod-trailing-drawdown-accounts/eod-performance-accounts-pa/", capture: "20260325193329"}
+  eod_payouts: {url: "https://apextraderfunding.com/help-center/eod-trailing-drawdown-accounts/eod-payouts/", capture: "20260504202951"}
+  intraday_eval: {url: "https://apextraderfunding.com/help-center/intraday-trailing-drawdown-accounts/intraday-trailing-drawdown-evaluations/", capture: "20260325193329"}
+  intraday_drawdown: {url: "https://apextraderfunding.com/help-center/intraday-trailing-drawdown-accounts/intraday-trailing-drawdown-explained/", capture: "20260527202906"}
+  intraday_pa: {url: "https://apextraderfunding.com/help-center/intraday-trailing-drawdown-accounts/intraday-trailing-drawdown-performance-accounts-pa/", capture: "20260325193329"}
+  intraday_payouts: {url: "https://apextraderfunding.com/help-center/intraday-trailing-drawdown-accounts/intraday-trailing-drawdown-payouts/", capture: "20260506000251"}
+  scaling: {url: "https://apextraderfunding.com/help-center/additional-helpful-items/scaling-levels-pa-explained/", capture: "20260325193407"}
+  consistency: {url: "https://apextraderfunding.com/help-center/additional-helpful-items/50-consistency-requirement/", capture: "20260630155758"}
+  fees_access: {url: "https://apextraderfunding.com/help-center/billing/evaluation-plan-fees-and-access-explained/", capture: "20260325193331"}
+  pricing_json: {url: "https://apextraderfunding.com/?picker_type=eod-trail&picker_vendor=Wealthcharts&picker_balance=150k", capture: "20260812233313", note: "embedded product JSON: eval `price`, PA `pa_features.price`"}
+  commissions: {url: "https://apextraderfunding.com/help-center/rithmic/rithmic-commissions-instruments/", capture: "search-snippet 2026-09-25", note: "NQ/ES $1.99/side confirmed; micro $0.51/side from epicctrader.com (2026-07-30), second-hand"}
+
+session:
+  reset_et: "18:00"          # fees_access / eod_eval FAQ
+  eod_snapshot_et: "16:59:59" # eod_drawdown
+  micros_per_contract: 10     # scaling: "ten micro contracts equal one standard contract"
+
+commissions_per_side:   # USD, source: commissions
+  standard: 1.99
+  micro: 0.51
+
+plans:
+  eod:
+    eval:   # source: eod_eval, eod_drawdown, fees_access, pricing_json
+      trail: eod              # threshold recalculated at EOD from EOD balance, enforced intraday
+      trail_stops_at: target  # Rithmic/WealthCharts: stops once threshold == target balance
+      access_calendar_days: 30
+      min_trading_days: 0
+      dll_pauses_day: true    # DLL hit liquidates + pauses session, does not fail the eval
+      sizes:
+        25K:  {balance: 25000,  target: 1500, drawdown: 1000, dll: 500,  max_contracts: 4,  price: 450}
+        50K:  {balance: 50000,  target: 3000, drawdown: 2000, dll: 1000, max_contracts: 6,  price: 550}
+        100K: {balance: 100000, target: 6000, drawdown: 3000, dll: 1500, max_contracts: 8,  price: 990}
+        150K: {balance: 150000, target: 9000, drawdown: 4000, dll: 2000, max_contracts: 12, price: 1890}
+    pa:     # source: eod_pa, eod_payouts, scaling, consistency, pricing_json
+      trail: eod
+      trail_stops_at: start_plus_100
+      activation_fee: {50K: 139, 100K: 149, 150K: 159}
+      payout: {min_days: 5, consistency: 0.5, min_amount: 500, max_payouts: 6}
+      min_daily_profit: {50K: 250, 100K: 300, 150K: 350}
+      payout_caps:
+        50K:  [1500, 1500, 2000, 2500, 2500, 3000]
+        100K: [2000, 2500, 2500, 3000, 4000, 4000]
+        150K: [2500, 3000, 3000, 3000, 4000, 5000]
+  intraday:
+    eval:   # source: intraday_eval, intraday_drawdown, fees_access, pricing_json
+      trail: intraday         # follows peak balance INCLUDING unrealized, in real time
+      trail_stops_at: target
+      access_calendar_days: 30
+      min_trading_days: 0
+      dll_pauses_day: false   # "No Daily Loss Limit"
+      sizes:
+        25K:  {balance: 25000,  target: 1500, drawdown: 1000, dll: 0, max_contracts: 4,  price: 167}
+        50K:  {balance: 50000,  target: 3000, drawdown: 2000, dll: 0, max_contracts: 6,  price: 249}
+        150K: {balance: 150000, target: 9000, drawdown: 4000, dll: 0, max_contracts: 12, price: 599}
+    pa:     # source: intraday_pa, intraday_payouts, scaling, consistency, pricing_json
+      trail: intraday
+      trail_stops_at: start_plus_100
+      activation_fee: {50K: 59}
+      payout: {min_days: 5, consistency: 0.5, min_amount: 500, max_payouts: 6}
+      min_daily_profit: {50K: 200, 100K: 250, 150K: 300}
+      payout_caps:
+        50K:  [1500, 2000, 2500, 2500, 3000, 3000]
+        100K: [2000, 2500, 3000, 3000, 4000, 4000]
+        150K: [2500, 3000, 3000, 4000, 4000, 5000]
+
+# PA scaling tiers (both plan types), source: scaling. `profit_from` = EOD balance - start.
+# Tier is set from the prior session's closing balance and fixed for the whole next session.
+# 25K omitted: the source table is internally inconsistent (Level 2 and 3 share a range).
+pa_tiers:
+  50K:
+    - {profit_from: 0,    max_contracts: 2, dll: 1000}
+    - {profit_from: 1500, max_contracts: 3, dll: 1000}
+    - {profit_from: 3000, max_contracts: 4, dll: 2000}
+    - {profit_from: 6000, max_contracts: 4, dll: 3000}
+  100K:
+    - {profit_from: 0,     max_contracts: 3, dll: 1750}
+    - {profit_from: 2000,  max_contracts: 4, dll: 1750}
+    - {profit_from: 3000,  max_contracts: 5, dll: 1750}
+    - {profit_from: 5000,  max_contracts: 6, dll: 2500}
+    - {profit_from: 10000, max_contracts: 6, dll: 3500}
+  150K:
+    - {profit_from: 0,     max_contracts: 4,  dll: 2500}
+    - {profit_from: 2000,  max_contracts: 5,  dll: 2500}
+    - {profit_from: 3000,  max_contracts: 7,  dll: 2500}
+    - {profit_from: 5000,  max_contracts: 10, dll: 3000}
+    - {profit_from: 10000, max_contracts: 10, dll: 4000}
+
+# Things we could not settle from the sources. Reported on every result that depends on them.
+open_questions:
+  - "Product JSON carries consistency_rule_percentage=30 and max_eval_daily_profit_percent=30 on evals, but the help pages say evals have no consistency rule. We follow the help pages and REPORT each strategy's largest-day share of eval profit so a 30% cap can be checked."
+  - "Eval pass is modelled as the session CLOSE balance >= target (the pass is reviewed at 16:59:59 ET). Touching the target intraday and giving it back does not count."
+  - "Payout qualifying days (5) and the consistency window are assumed to reset after each approved payout (the pages describe weekly payouts and 'since your last approved payout')."
+  - "Payouts are assumed to be requested as soon as eligible, for the largest allowed amount."
+  - "PA activation fee = pa_features.price in the product JSON; the help pages give no amount."
+  - "The proxy has no bars 16:15-17:00 ET, so strategies must be flat by 16:10 ET (stricter than Apex)."

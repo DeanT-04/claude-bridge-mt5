@@ -28,3 +28,95 @@ def vault_sync() -> None:
     console.print(
         f"copied {len(res.copied)}, deleted {len(res.deleted)}, unchanged {res.unchanged}"
     )
+
+
+data_app = typer.Typer(no_args_is_help=True, help="Market data: download, build bars, check.")
+app.add_typer(data_app, name="data")
+
+
+@data_app.command("fetch")
+def data_fetch(
+    symbol: str = typer.Option(..., help="Instrument symbol, e.g. NQ"),
+    start: str = typer.Option("2012-01-01", "--from", help="UTC start date YYYY-MM-DD"),
+    pause: float = typer.Option(1.0, help="Seconds between requests (be polite)"),
+) -> None:
+    """Download Dukascopy bid+ask 1-minute proxy bars (resumable)."""
+    from datetime import UTC, datetime
+
+    from propquant import instruments
+    from propquant.data import dukascopy
+
+    inst = instruments.get(symbol)
+    begin = datetime.fromisoformat(start).replace(tzinfo=UTC)
+    for side in dukascopy.SIDES:
+
+        def show(ts, n, side=side):
+            console.print(f"{symbol} {side}: {ts:%Y-%m-%d %H:%M}  (+{n:,} bars)")
+
+        n = dukascopy.download(
+            symbol, inst.proxy.instrument, side, begin, pause=pause, progress=show
+        )
+        console.print(f"[bold]{symbol} {side}: {n:,} new bars[/bold]")
+
+
+@data_app.command("build")
+def data_build(symbol: str = typer.Option(..., help="Instrument symbol, e.g. NQ")) -> None:
+    """Build mid-price 1m bars (+5m/15m/1h) from raw proxy quotes and write a quality report."""
+    from datetime import date
+
+    from propquant.data import bars, dukascopy, store
+    from propquant.vault import writer
+
+    one = bars.mid_bars(dukascopy.load_raw(symbol, "bid"), dukascopy.load_raw(symbol, "ask"))
+    store.write_parquet(one, store.bars_path(symbol, "1m"))
+    for tf in ("5m", "15m", "1h"):
+        store.write_parquet(bars.resample(one, tf), store.bars_path(symbol, tf))
+    q = bars.quality_report(one) | {"data_hash": store.frame_hash(one)}
+    rows = [{"check": k, "value": v} for k, v in q.items()]
+    writer.write_note(
+        f"Reports/Data-quality-{symbol}.md",
+        f"---\ntype: report\nkind: data-quality\nsymbol: {symbol}\n"
+        f"generated: {date.today().isoformat()}\n---\n# Data quality: {symbol} proxy 1m bars\n\n"
+        f"{writer.md_table(rows)}\n\nReproduce: `uv run propquant data build --symbol {symbol}`\n",
+    )
+    for r in rows:
+        console.print(f"{r['check']:>28}: {r['value']}")
+
+
+@data_app.command("collect")
+def data_collect(symbol: str = typer.Option(..., help="Instrument symbol, e.g. NQ")) -> None:
+    """Fetch real futures bars from Yahoo (1m/5m/1h) and merge them into storage."""
+    from propquant import instruments
+    from propquant.data import yfin
+
+    ticker = instruments.get(symbol).futures.ticker
+    for interval in yfin.PERIODS:
+        new, total = yfin.collect(symbol, ticker, interval)
+        console.print(f"{symbol} {interval}: +{new:,} bars (total {total:,})")
+
+
+@data_app.command("tracking")
+def data_tracking(symbol: str = typer.Option(..., help="Instrument symbol, e.g. NQ")) -> None:
+    """Measure proxy-vs-futures fidelity; writes charts + a vault report."""
+    from propquant.reports import fidelity
+
+    res = fidelity.run(symbol)
+    for r in res["timeframes"]:
+        console.print(
+            f"{r['timeframe']:>3}: ret_corr={r['ret_corr']:.3f} range_corr={r['range_corr']:.3f} "
+            f"up={r['up_exc_corr']:.3f} down={r['down_exc_corr']:.3f} n={r['n']:,} "
+            f"excluded={r['excluded_outliers']} usable={r['usable']}"
+        )
+    console.print(res["extremes"], res["intrabar"])
+
+
+firms_app = typer.Typer(no_args_is_help=True, help="Prop-firm rules.")
+app.add_typer(firms_app, name="firms")
+
+
+@firms_app.command("note")
+def firms_note(firm: str = typer.Argument("apex")) -> None:
+    """Write the firm's verified rules into the vault."""
+    from propquant.firms import note
+
+    console.print(note.write(firm))
