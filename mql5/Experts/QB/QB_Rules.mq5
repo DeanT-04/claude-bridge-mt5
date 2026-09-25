@@ -13,6 +13,7 @@
 #include <QB\TradeLogger.mqh>
 #include <QB\Tester.mqh>
 #include <QB\Signals.mqh>
+#include <QB\Execution.mqh>
 
 input ENUM_QB_FAMILY InpFamily = QB_DONCHIAN;
 // --- exits / session (common)
@@ -50,11 +51,15 @@ input double InpF1P2   = 1.0;
 input int    InpF2     = 0;
 input int    InpF2P1   = 100;
 input double InpF2P2   = 1.0;
+// --- ML family (QB_ML)
+input double InpMlThr   = 0.56;
+input string InpMlModel = "";      // file in Common\Files\QB\models
 
 CTrade     g_trade;
 CQBSignal *g_sig = NULL;
 int        g_atr = INVALID_HANDLE;
 datetime   g_last_bar = 0;
+QBPending  g_pend;
 
 int OnInit()
 {
@@ -69,6 +74,7 @@ int OnInit()
    p.trig = InpTrig; p.trig_p1 = InpTrigP1; p.trig_p2 = InpTrigP2; p.invert = InpInvert;
    p.f1 = InpF1; p.f1_p1 = InpF1P1; p.f1_p2 = InpF1P2;
    p.f2 = InpF2; p.f2_p1 = InpF2P1; p.f2_p2 = InpF2P2;
+   p.ml_thr = InpMlThr; p.ml_model = InpMlModel;
    g_sig = QB_CreateSignal(InpFamily);
    if(g_sig == NULL || !g_sig.Init(_Symbol, _Period, p)) return INIT_FAILED;
    g_atr = iATR(_Symbol, _Period, InpAtrPeriod);
@@ -109,15 +115,25 @@ bool HasPosition(ulong &ticket)
 void OnTick()
 {
    datetime bar = iTime(_Symbol, _Period, 0);
-   if(bar == g_last_bar) return;
-   g_last_bar = bar;
+   if(bar != g_last_bar)
+   {
+      g_last_bar = bar;
+      QB_PendingReset(g_pend, bar);
+      Decide(bar);
+   }
+   ulong t;
+   QB_RunPending(g_trade, _Symbol, g_pend, bar, g_pend.close_ticket == 0 && !HasPosition(t));
+}
 
+// Decisions are made once, at the bar's first tick; execution may retry within the bar.
+void Decide(const datetime bar)
+{
    ulong ticket;
    if(HasPosition(ticket))
    {
       int held = iBarShift(_Symbol, _Period, (datetime)PositionGetInteger(POSITION_TIME));
-      if(held >= InpMaxBars) g_trade.PositionClose(ticket);
-      else return;
+      if(held < InpMaxBars) return;
+      g_pend.close_ticket = ticket;              // time exit; entry may follow on the same bar
    }
    if(!InSession(bar)) return;
 
@@ -127,18 +143,10 @@ void OnTick()
    if(CopyBuffer(g_atr, 0, 1, 1, atr) != 1 || atr[0] <= 0) return;
 
    double sl_dist = InpSlAtr * atr[0];
-   double tp_dist = InpTpAtr * atr[0];
    double lots = QB_LotsForRisk(_Symbol, InpRiskPct, sl_dist);
    if(lots <= 0) return;
-   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   if(dir > 0)
-   {
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      g_trade.Buy(lots, _Symbol, ask, NormalizeDouble(ask - sl_dist, digits), NormalizeDouble(ask + tp_dist, digits));
-   }
-   else
-   {
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      g_trade.Sell(lots, _Symbol, bid, NormalizeDouble(bid + sl_dist, digits), NormalizeDouble(bid - tp_dist, digits));
-   }
+   g_pend.dir = dir;
+   g_pend.sl_dist = sl_dist;
+   g_pend.tp_dist = InpTpAtr * atr[0];
+   g_pend.lots = lots;
 }

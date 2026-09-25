@@ -109,3 +109,13 @@ def save_genome(con, family: str, genome: dict, description: str, symbol: str, t
 def get_genome(con, family: str) -> dict | None:
     r = con.execute("SELECT genome FROM genomes WHERE id=?", (family.removeprefix("gen_"),)).fetchone()
     return None if r is None else json.loads(r["genome"])
+
+
+def save_ml_spec(con, family: str, spec: dict) -> None:
+    con.execute("INSERT OR IGNORE INTO ml_models(id, spec) VALUES (?,?)", (family, json.dumps(spec, sort_keys=True)))
+    con.commit()
+
+
+def get_ml_spec(con, family: str) -> dict | None:
+    r = con.execute("SELECT spec FROM ml_models WHERE id=?", (family,)).fetchone()
+    return None if r is None else json.loads(r["spec"])

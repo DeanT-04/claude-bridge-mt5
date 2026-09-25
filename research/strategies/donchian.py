@@ -7,7 +7,7 @@ import numpy as np
 
 from ..engine import Costs, atr_sma, server_hour, simulate
 
-EXPERT = "QB\\QB_Donchian.ex5"
+EXPERT = "QB\\QB_Rules.ex5"   # runs as QB_Rules family 0 (QB_Donchian.mq5 is legacy)
 fid = 0   # ENUM_QB_FAMILY value in Signals.mqh (QB_Host runs it as a sleeve)
 
 

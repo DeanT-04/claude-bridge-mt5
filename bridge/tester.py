@@ -90,8 +90,11 @@ class Job:
             lines.append("ForwardMode=0")
         if self.spread is not None:
             lines.append(f"Spread={self.spread}")
-        params = dict(self.params)
-        params.setdefault("InpRunTag", Param(self.tag))
+        # The tester silently reuses the previous run's value for any input left out, so always
+        # write every input: explicit params first, then the defaults declared in the source.
+        params = {k: Param(v) for k, v in ea_input_defaults(self.expert).items()}
+        params.update(self.params)
+        params["InpRunTag"] = self.params.get("InpRunTag", Param(self.tag))
         lines.append("[TesterInputs]")
         lines += [f"{k}={p.ini()}" for k, p in params.items()]
         return "\r\n".join(lines) + "\r\n"
@@ -99,6 +102,50 @@ class Job:
     @property
     def report_rel(self) -> str:
         return f"reports\\{self.tag}"
+
+
+_INPUT_RE = re.compile(r"^\s*input\s+(\w+)\s+(\w+)\s*=\s*([^;]+);", re.M)
+_INCLUDE_RE = re.compile(r'^\s*#include\s+<(QB\\[^>]+)>', re.M)
+
+
+def ea_input_defaults(expert: str) -> dict:
+    """Default values of every `input` in an EA and the QB headers it includes.
+    expert: 'QB\\QB_Rules.ex5' (relative to MQL5\\Experts). Enum defaults resolve to their values."""
+    src_root = config.ROOT / "mql5"
+    src = src_root / "Experts" / expert.replace(".ex5", ".mq5")
+    if not src.exists():
+        return {}
+    texts, seen, todo = [], set(), [src]
+    while todo:
+        f = todo.pop()
+        if f in seen or not f.exists():
+            continue
+        seen.add(f)
+        t = f.read_text(encoding="utf-8", errors="replace")
+        texts.append(t)
+        todo += [src_root / "Include" / m for m in _INCLUDE_RE.findall(t)]
+    enums = {}
+    for t in texts:
+        for name, val in re.findall(r"^\s*(QB_\w+)\s*=\s*(\d+)\s*,", t, re.M):
+            enums[name] = int(val)
+    out = {}
+    for t in texts:
+        for typ, name, raw in _INPUT_RE.findall(t):
+            raw = raw.split("//")[0].strip()
+            if typ == "string":
+                out[name] = raw.strip('"')
+            elif typ in ("double", "float"):
+                out[name] = float(raw)
+            elif typ == "bool":
+                out[name] = raw == "true"
+            elif raw in enums:
+                out[name] = enums[raw]
+            else:
+                try:
+                    out[name] = int(raw)
+                except ValueError:
+                    continue
+    return out
 
 
 def tester_deposit(currency: str) -> float:

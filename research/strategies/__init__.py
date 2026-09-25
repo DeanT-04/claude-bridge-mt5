@@ -21,6 +21,16 @@ def get_family(name: str):
                 raise KeyError(f"unknown generated family {name!r}")
             _generated[name] = generic.make_family(g)
         return _generated[name]
+    if name.startswith("ml_"):
+        if name not in _generated:
+            from registry import db
+            from .. import ml
+            from . import mlfam
+            s = db.get_ml_spec(db.connect(), name)
+            if s is None:
+                raise KeyError(f"unknown ML family {name!r}")
+            _generated[name] = mlfam.make_family(ml.MLSpec(**s))
+        return _generated[name]
     raise KeyError(f"unknown family {name!r}")
 
 

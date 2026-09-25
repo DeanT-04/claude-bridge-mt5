@@ -10,8 +10,8 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 | M1 | Bridge, tester automation, research engine, gauntlet, MT5 parity | ✅ done |
 | M2 | Symbol auto-discovery + cost filter, 7 strategy families, research queue | ✅ done |
 | M3 | Portfolio host EA, approval-gated demo deployment, monitoring, `promote_to_live` | 🔨 in progress |
-| M4 | Generated / genetic strategies (building blocks → Python + MQL5) | 🔨 in progress |
-| M5 | ML strategies (ONNX) | planned |
+| M4 | Generated / genetic strategies (building blocks → Python + MQL5) | ✅ built (first batch running) |
+| M5 | ML strategies (walk-forward sklearn → ONNX in MT5) | ✅ built (first batch running) |
 | M6 | Live readiness + VPS migration | planned |
 | M7 | Prop-firm rule profiles | planned |
 
@@ -93,6 +93,24 @@ search. The top 5 structurally distinct genomes become families `gen_<hash>` (st
 walk-forward grid.
 
 Queue it: `python scripts/research.py enqueue --families evolve --symbols small --tf H1,M30`.
+
+## ML strategies (M5)
+`QB_ML` (family id 8): `research/ml.py` + `CSigML` in `Signals.mqh`.
+
+- **12 features** of the closed bar, all from MT5 built-ins: ATR-normalised returns over
+  1/4/12/24 bars, distance from EMA20 and EMA100, RSI14, ATR14/ATR100, bar range, hour sin/cos
+  and position in the 20-bar channel.
+- **Label:** a long with a symmetric k×ATR stop/target and a time exit wins (R > 0). One model
+  serves both sides: long if p > t, short if p < 1 − t.
+- **Walk-forward:** expanding-window retrain every 6 months (after 24 months of data), label
+  horizon purged before each cut, and a forced cut at the holdout boundary. That last model is
+  exported to `Common\Files\QB\models\ml_<hash>.onnx` and runs in the MT5 tester and `QB_Host`
+  (ONNX output matches sklearn to 1e-7).
+- Models: `logreg` (scaled logistic regression) and `gbm` (sklearn gradient boosting;
+  HistGradientBoosting doesn't convert with skl2onnx 1.20). The gauntlet grid is the threshold
+  (0.52–0.66) plus neighbouring exits.
+- Queue: `python scripts/research.py ml --symbols small --tf H1 --models logreg,gbm`
+  (MCP: `enqueue_ml`). Parity vs MT5 (XAUUSD H1): 96.6%.
 
 ## Symbol universe
 `research/universe.py` scans every tradable non-equity symbol (equities optional) and records
@@ -180,4 +198,12 @@ Thresholds are in `config/gauntlet.yaml`.
   ~1.5–4% risk per trade, or much tighter stops.
 - Known limitation: `portfolio_allocation` re-runs each sleeve's *final* (in-sample tuned)
   params, so its Sharpe figures are optimistic. It should use walk-forward OOS trades instead.
+- **Orders at a session's first bar get "Market closed".** On XAUUSD the 01:00 server-time bar
+  opens before trading does, so entries and time-exit closes there were silently lost.
+  `Execution.mqh` now keeps the decision pending and retries on later ticks of the same bar
+  (both `QB_Rules` and `QB_Host`). This matters for live trading, not just parity.
+- **The MT5 tester reuses the previous run's value for any input left out of `[TesterInputs]`.**
+  A Donchian run silently executed as the ML family (6.8% parity). `tester.Job` now writes every
+  input, using defaults parsed from the EA source and QB headers (enums resolved). Donchian now
+  runs through `QB_Rules` (family 0); `QB_Donchian.mq5` is legacy.
 - MT5 build 6182 starts its own built-in MCP server (127.0.0.1:22346); to be explored.

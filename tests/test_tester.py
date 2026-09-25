@@ -41,3 +41,13 @@ def test_parse_report_html(tmp_path):
     p.write_text(html, encoding="utf-16")
     s = tester.parse_report(p)
     assert s["net_profit"] == 123.45 and s["profit_factor"] == 1.52 and s["trades"] == 210
+
+
+def test_every_ea_input_is_written_so_tester_cannot_reuse_stale_values():
+    job = tester.Job(r"QB\QB_Rules.ex5", "XAUUSD", "H1", date(2024, 1, 1), date(2024, 2, 1),
+                     params={"InpChannel": tester.Param(30)}, tag="t1", deposit=100, currency="USD")
+    ini = job.ini_text()
+    assert "InpChannel=30||30||0||30||N" in ini
+    assert "InpFamily=0||0||0||0||N" in ini            # enum default resolved from Signals.mqh
+    assert "InpBalanceScale=1||1||0||1||N" in ini       # from an included header
+    assert "InpMlModel=\r\n" in ini and "InpRunTag=t1\r\n" in ini

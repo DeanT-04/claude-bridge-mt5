@@ -162,6 +162,27 @@ def enqueue_research(families: list[str], symbols: list[str], timeframes: list[s
 
 
 @mcp.tool()
+def enqueue_ml(symbols: list[str], timeframes: list[str], models: list[str] | None = None,
+               label_k: float = 1.5, label_bars: int = 24) -> dict:
+    """Register ML strategies (walk-forward logreg/gbm on 12 features, exported to ONNX) and queue
+    their gauntlets. symbols: names or ['small'|'researchable'|'core']."""
+    from research import jobqueue, ml
+    from research import universe as uni
+    if symbols in (["small"], ["researchable"]):
+        symbols = [r["symbol"] for r in uni.load(small_account_only=symbols == ["small"])]
+    elif symbols == ["core"]:
+        symbols = list(config.settings()["research"]["core_symbols"])
+    n, fams = 0, []
+    for s in symbols:
+        for tf in timeframes:
+            for mdl in models or ["logreg", "gbm"]:
+                f = ml.register(s, tf, mdl, label_k, label_bars)
+                fams.append(f)
+                n += jobqueue.enqueue([f], [s], [tf])
+    return {"families": fams, "enqueued": n}
+
+
+@mcp.tool()
 def start_research(processes: int = 3, mt5_confirm: bool = True) -> dict:
     """Start the queue worker in the background (Python gauntlets in parallel, then MT5
     confirmation of survivors). Output goes to runtime/reports/research_worker.log."""

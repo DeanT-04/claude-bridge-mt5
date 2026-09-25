@@ -15,6 +15,7 @@ enum ENUM_QB_FAMILY
    QB_KELTNER       = 5,
    QB_HOUR_MOMENTUM = 6,
    QB_GENERIC       = 7,   // M4: trigger + filters encoded as parameters
+   QB_ML            = 8,   // M5: ONNX model probability vs threshold
 };
 
 struct QBSignalParams
@@ -30,6 +31,8 @@ struct QBSignalParams
    int    trig, trig_p1; double trig_p2; int invert;
    int    f1, f1_p1; double f1_p2;
    int    f2, f2_p1; double f2_p2;
+   // ML (QB_ML): see CSigML
+   double ml_thr; string ml_model;
 };
 
 class CQBSignal
@@ -347,6 +350,85 @@ public:
    }
 };
 
+//--- QB_ML: 12 features of closed bar [1] -> ONNX classifier -> P(long wins).
+//    Twin: research/ml.py (FEATURES order = model input order). Long if p > thr,
+//    short if p < 1 - thr. Model file: Common\Files\QB\models\<ml_model>.
+class CSigML : public CQBSignal
+{
+   long m_onnx;
+   int  m_e20, m_e100, m_rsi, m_a14, m_a100;
+public:
+   CSigML() : m_onnx(INVALID_HANDLE), m_e20(INVALID_HANDLE), m_e100(INVALID_HANDLE), m_rsi(INVALID_HANDLE),
+              m_a14(INVALID_HANDLE), m_a100(INVALID_HANDLE) {}
+
+   bool Init(const string sym, const ENUM_TIMEFRAMES tf, const QBSignalParams &p)
+   {
+      CQBSignal::Init(sym, tf, p);
+      m_onnx = OnnxCreate("QB\\models\\" + p.ml_model, ONNX_COMMON_FOLDER);
+      if(m_onnx == INVALID_HANDLE) { Print("QB ML: cannot load model ", p.ml_model, " err=", GetLastError()); return false; }
+      ulong in_shape[] = {1, 12};
+      ulong lab_shape[] = {1};
+      ulong prob_shape[] = {1, 2};
+      if(!OnnxSetInputShape(m_onnx, 0, in_shape) || !OnnxSetOutputShape(m_onnx, 0, lab_shape) ||
+         !OnnxSetOutputShape(m_onnx, 1, prob_shape))
+      { Print("QB ML: shape setup failed err=", GetLastError()); return false; }
+      m_e20 = iMA(sym, tf, 20, 0, MODE_EMA, PRICE_CLOSE);
+      m_e100 = iMA(sym, tf, 100, 0, MODE_EMA, PRICE_CLOSE);
+      m_rsi = iRSI(sym, tf, 14, PRICE_CLOSE);
+      m_a14 = iATR(sym, tf, 14);
+      m_a100 = iATR(sym, tf, 100);
+      return m_e20 != INVALID_HANDLE && m_e100 != INVALID_HANDLE && m_rsi != INVALID_HANDLE &&
+             m_a14 != INVALID_HANDLE && m_a100 != INVALID_HANDLE;
+   }
+
+   int Direction()
+   {
+      double e20[], e100[], r[], a14[], a100[];
+      if(!Buf(m_e20, 0, 1, 1, e20) || !Buf(m_e100, 0, 1, 1, e100) || !Buf(m_rsi, 0, 1, 1, r) ||
+         !Buf(m_a14, 0, 1, 1, a14) || !Buf(m_a100, 0, 1, 1, a100)) return 0;
+      double atr = a14[0];
+      if(atr <= 0 || a100[0] <= 0) return 0;
+      double c1 = iClose(m_sym, m_tf, 1), h1 = iHigh(m_sym, m_tf, 1), l1 = iLow(m_sym, m_tf, 1);
+      int hh = iHighest(m_sym, m_tf, MODE_HIGH, 20, 1), ll = iLowest(m_sym, m_tf, MODE_LOW, 20, 1);
+      if(hh < 0 || ll < 0) return 0;
+      double H = iHigh(m_sym, m_tf, hh), L = iLow(m_sym, m_tf, ll);
+      if(H <= L) return 0;
+      MqlDateTime d0; TimeToStruct(iTime(m_sym, m_tf, 0), d0);
+
+      matrixf x(1, 12);
+      int lags[] = {1, 4, 12, 24};
+      for(int k = 0; k < 4; k++)
+      {
+         double cn = iClose(m_sym, m_tf, 1 + lags[k]);
+         if(cn <= 0) return 0;
+         x[0][k] = (float)((c1 - cn) / atr);
+      }
+      x[0][4]  = (float)((c1 - e20[0]) / atr);
+      x[0][5]  = (float)((c1 - e100[0]) / atr);
+      x[0][6]  = (float)(r[0] / 100.0);
+      x[0][7]  = (float)(atr / a100[0]);
+      x[0][8]  = (float)((h1 - l1) / atr);
+      x[0][9]  = (float)MathSin(2 * M_PI * d0.hour / 24.0);
+      x[0][10] = (float)MathCos(2 * M_PI * d0.hour / 24.0);
+      x[0][11] = (float)((c1 - L) / (H - L));
+
+      long label[1];
+      matrixf prob(1, 2);
+      if(!OnnxRun(m_onnx, ONNX_NO_CONVERSION, x, label, prob)) { Print("QB ML: OnnxRun failed err=", GetLastError()); return 0; }
+      double p = prob[0][1];
+      if(p > m_p.ml_thr) return 1;
+      if(p < 1.0 - m_p.ml_thr) return -1;
+      return 0;
+   }
+
+   ~CSigML()
+   {
+      if(m_onnx != INVALID_HANDLE) OnnxRelease(m_onnx);
+      int hs[] = {m_e20, m_e100, m_rsi, m_a14, m_a100};
+      for(int i = 0; i < 5; i++) if(hs[i] != INVALID_HANDLE) IndicatorRelease(hs[i]);
+   }
+};
+
 CQBSignal *QB_CreateSignal(const ENUM_QB_FAMILY fam)
 {
    switch(fam)
@@ -359,6 +441,7 @@ CQBSignal *QB_CreateSignal(const ENUM_QB_FAMILY fam)
       case QB_KELTNER:       return new CSigKeltner();
       case QB_HOUR_MOMENTUM: return new CSigHourMomentum();
       case QB_GENERIC:       return new CSigGeneric();
+      case QB_ML:            return new CSigML();
    }
    return NULL;
 }

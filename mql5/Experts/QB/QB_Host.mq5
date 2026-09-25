@@ -20,6 +20,7 @@
 #include <Trade\Trade.mqh>
 #include <QB\Risk.mqh>
 #include <QB\Signals.mqh>
+#include <QB\Execution.mqh>
 
 input string InpConfig    = "portfolio_demo.cfg";  // file in Common\Files\QB
 input long   InpMagicBase = 900000;                 // sleeve magic = base + sleeve id
@@ -46,6 +47,7 @@ public:
    datetime        last_bar;
    long            magic;
    string          error;
+   QBPending       pend;
 
    CSleeve() : sig(NULL), atr(INVALID_HANDLE), last_bar(0), risk(0), max_spread(0),
                atr_period(14), sl_atr(2), tp_atr(3), max_bars(24), s_start(0), s_end(24), error("")
@@ -55,6 +57,7 @@ public:
       sp.kc_mult = 1.5; sp.entry_hour = 10; sp.lookback = 4;
       sp.trig = 0; sp.trig_p1 = 20; sp.trig_p2 = 2.0; sp.invert = 0;
       sp.f1 = 0; sp.f1_p1 = 100; sp.f1_p2 = 1.0; sp.f2 = 0; sp.f2_p1 = 100; sp.f2_p2 = 1.0;
+      sp.ml_thr = 0.56; sp.ml_model = "";
    }
    ~CSleeve() { Release(); }
 
@@ -150,6 +153,8 @@ void SetSleeveField(CSleeve &s, const string k, const string v)
    else if(k == "InpF2") s.sp.f2 = (int)StringToInteger(v);
    else if(k == "InpF2P1") s.sp.f2_p1 = (int)StringToInteger(v);
    else if(k == "InpF2P2") s.sp.f2_p2 = StringToDouble(v);
+   else if(k == "InpMlThr") s.sp.ml_thr = StringToDouble(v);
+   else if(k == "InpMlModel") s.sp.ml_model = v;
 }
 
 void ClearSleeves()
@@ -327,40 +332,46 @@ void ProcessSleeve(CSleeve *s, const bool may_enter)
 {
    if(s.sig == NULL) return;
    datetime bar = iTime(s.sym, s.tf, 0);
-   if(bar == 0 || bar == s.last_bar) return;
-   s.last_bar = bar;
+   if(bar == 0) return;
    g_trade.SetExpertMagicNumber(s.magic);
+   if(bar != s.last_bar)
+   {
+      s.last_bar = bar;
+      QB_PendingReset(s.pend, bar);
+      DecideSleeve(s, bar, may_enter);
+   }
+   if(!may_enter) s.pend.dir = 0;             // a halt mid-bar cancels a pending entry
+   ulong t;
+   QB_RunPending(g_trade, s.sym, s.pend, bar, s.pend.close_ticket == 0 && !PositionFor(s, t));
+}
 
+// Decisions are made once per bar; Execution.mqh retries them within the bar if rejected.
+void DecideSleeve(CSleeve *s, const datetime bar, const bool may_enter)
+{
    ulong ticket;
    if(PositionFor(s, ticket))
    {
       int held = iBarShift(s.sym, s.tf, (datetime)PositionGetInteger(POSITION_TIME));
-      if(held >= s.max_bars) g_trade.PositionClose(ticket);
-      else return;
+      if(held < s.max_bars) return;
+      s.pend.close_ticket = ticket;
    }
    if(!may_enter || !InSession(s, bar)) return;
    int dir = s.sig.Direction();
    if(dir == 0) return;
-   if(g_max_open > 0 && OpenRiskPct() + s.risk > g_max_open + 1e-9) return;
+   double open_risk = OpenRiskPct() - (s.pend.close_ticket != 0 ? s.risk : 0);
+   if(g_max_open > 0 && open_risk + s.risk > g_max_open + 1e-9) return;
    if(s.max_spread > 0 && SymbolInfoInteger(s.sym, SYMBOL_SPREAD) > s.max_spread) return;
 
    double atr[1];
    if(CopyBuffer(s.atr, 0, 1, 1, atr) != 1 || atr[0] <= 0) return;
-   double sl_dist = s.sl_atr * atr[0], tp_dist = s.tp_atr * atr[0];
+   double sl_dist = s.sl_atr * atr[0];
    double lots = QB_LotsForRiskScaled(s.sym, s.risk, sl_dist, g_scale);
    if(lots <= 0) return;
-   int digits = (int)SymbolInfoInteger(s.sym, SYMBOL_DIGITS);
-   string cmt = StringFormat("QB s%d f%d", s.id, (int)s.fam);
-   if(dir > 0)
-   {
-      double ask = SymbolInfoDouble(s.sym, SYMBOL_ASK);
-      g_trade.Buy(lots, s.sym, ask, NormalizeDouble(ask - sl_dist, digits), NormalizeDouble(ask + tp_dist, digits), cmt);
-   }
-   else
-   {
-      double bid = SymbolInfoDouble(s.sym, SYMBOL_BID);
-      g_trade.Sell(lots, s.sym, bid, NormalizeDouble(bid + sl_dist, digits), NormalizeDouble(bid - tp_dist, digits), cmt);
-   }
+   s.pend.dir = dir;
+   s.pend.sl_dist = sl_dist;
+   s.pend.tp_dist = s.tp_atr * atr[0];
+   s.pend.lots = lots;
+   s.pend.comment = StringFormat("QB s%d f%d", s.id, (int)s.fam);
 }
 
 //+------------------------------------------------------------------+

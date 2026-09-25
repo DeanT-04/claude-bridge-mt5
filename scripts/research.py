@@ -39,7 +39,22 @@ def main():
     e.add_argument("--redo", action="store_true")
     r = sub.add_parser("run"); r.add_argument("--procs", type=int, default=3); r.add_argument("--no-mt5", action="store_true")
     sub.add_parser("status"); sub.add_parser("survivors"); sub.add_parser("confirm")
+    m = sub.add_parser("ml")
+    m.add_argument("--symbols", default="small"); m.add_argument("--tf", default="H1")
+    m.add_argument("--models", default="logreg,gbm")
+    m.add_argument("--label-k", type=float, default=1.5); m.add_argument("--label-bars", type=int, default=24)
     a = ap.parse_args()
+
+    if a.cmd == "ml":
+        from research import ml
+        fams = [ml.register(s, tf, mdl, a.label_k, a.label_bars)
+                for s in resolve_symbols(a.symbols) for tf in a.tf.split(",") for mdl in a.models.split(",")]
+        n = 0
+        for f in fams:          # each ML family belongs to one symbol/timeframe
+            spec = __import__("research.strategies", fromlist=["get_family"]).get_family(f).spec
+            n += jobqueue.enqueue([f], [spec.symbol], [spec.timeframe])
+        print(f"registered {len(fams)} ML families, enqueued {n} gauntlets")
+        return
 
     if a.cmd == "scan":
         rows = universe.scan(include_equities=a.equities)

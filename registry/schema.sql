@@ -87,3 +87,10 @@ CREATE TABLE IF NOT EXISTS genomes (
     fitness     REAL,
     created     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ML strategy specs (M5); family name = id ('ml_<hash>'). Model file: Common\Files\QB\models\<id>.onnx
+CREATE TABLE IF NOT EXISTS ml_models (
+    id          TEXT PRIMARY KEY,
+    spec        TEXT NOT NULL,      -- JSON of research.ml.MLSpec
+    created     TEXT NOT NULL DEFAULT (datetime('now'))
+);
