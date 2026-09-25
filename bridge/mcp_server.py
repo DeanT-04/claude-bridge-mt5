@@ -213,11 +213,22 @@ def research_survivors() -> list[dict]:
 
 # ------------------------------------------------------------------ deployment (M3)
 @mcp.tool()
-def install_host() -> dict:
-    """Sync the QB sources into the main (demo/live) terminal and compile QB_Host there.
-    Afterwards the user attaches QB_Host to any chart once and enables Algo Trading."""
-    dest = config.path(config.settings()["terminal"]["data_dir"]) / "MQL5"
-    return compiler.compile_expert("QB_Host", dest)
+def install_host(target: str = "demo") -> dict:
+    """Sync the QB sources into the demo or live terminal and compile QB_Host there. Afterwards
+    the user attaches QB_Host to any chart once (InpConfig=portfolio_<target>.cfg) and enables
+    Algo Trading. ML sleeves also need their .onnx files, which live in the shared Common folder."""
+    from bridge import preflight
+    return compiler.compile_expert("QB_Host", preflight.terminal_mql5(target))
+
+
+@mcp.tool()
+def live_preflight() -> dict:
+    """Read-only live-readiness report: live_enabled, separate live terminal reachable and on a
+    REAL account in the target currency/leverage, QB_Host compiled + running + not halted, risk
+    limits sane, every sleeve validated, and each sleeve's min lot fits its risk at the real
+    balance. Run before approving any live proposal."""
+    from bridge import preflight
+    return preflight.live_preflight()
 
 
 @mcp.tool()

@@ -12,7 +12,7 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 | M3 | Portfolio host EA, approval-gated demo deployment, monitoring, `promote_to_live` | 🔨 in progress |
 | M4 | Generated / genetic strategies (building blocks → Python + MQL5) | ✅ built (first batch running) |
 | M5 | ML strategies (walk-forward sklearn → ONNX in MT5) | ✅ built (first batch running) |
-| M6 | Live readiness + VPS migration | planned |
+| M6 | Live readiness + VPS migration | ✅ built (no live account yet) |
 | M7 | Prop-firm rule profiles | planned |
 
 ## Accounts
@@ -151,6 +151,27 @@ Flow (MCP tools):
 
 Sleeves that failed the gauntlet can run **on demo only** with `allow_unvalidated=True`, at a
 fixed 0.5% risk, for plumbing and forward-test experiments. Live never accepts them.
+
+## Going live (M6)
+Live runs in its **own portable terminal** (`terminals.live` in settings, default
+`runtime\live`), never the demo one. That keeps the demo forward-test history readable, and
+neither account can touch the other. `QB_Host` refuses a config whose `account=` doesn't match
+the terminal's account type.
+
+1. Open a live account (a Prime or Institutional account adds commission; update the cost model).
+   Log in yourself.
+2. `python scripts/setup_terminal.py live`, then launch `runtime\live\terminal64.exe /portable` and log in.
+3. MCP `install_host(target='live')`; attach QB_Host with `InpConfig=portfolio_live.cfg`.
+4. Set `account.live_enabled: true` in `config/settings.yaml` yourself.
+5. `live_preflight()` must be all OK. It checks: a REAL account in GBP at the researched leverage,
+   the host compiled/running/not halted, risk limits within bounds, every sleeve validated, and
+   each sleeve's minimum lot within its risk at the actual balance.
+6. `promote_to_live([sleeve ids])` (validated sleeves with a passing demo forward test) →
+   review → approve → `apply_deployment`.
+
+**Emergency stop without Python or Claude:**
+`powershell -ExecutionPolicy Bypass -File scripts\kill_switch.ps1 live`. For a VPS, see
+[docs/VPS.md](docs/VPS.md).
 
 ## The gauntlet (gate to demo)
 Pre-screen (150 random configs; the best must reach Sharpe 0.5, or the job stops early) →

@@ -44,6 +44,16 @@ def terminal_exe() -> Path:
     return path(settings()["terminal"]["install_dir"]) / "terminal64.exe"
 
 
+def target_terminal(target: str) -> tuple[Path, bool]:
+    """(terminal64.exe path, portable flag) for 'demo' or 'live'."""
+    t = settings().get("terminals", {}).get(target)
+    if t is None:
+        if target == "demo":
+            return terminal_exe(), False
+        raise KeyError(f"no terminal configured for target {target!r}")
+    return path(t["install_dir"]) / "terminal64.exe", bool(t.get("portable"))
+
+
 def tester_dir() -> Path:
     return path(settings()["tester"]["install_dir"])
 

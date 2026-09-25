@@ -5,6 +5,18 @@ terminal:
   data_dir: ${APPDATA}\MetaQuotes\Terminal\16D9C17040576AD13C62C316983027D5
   common_files: ${APPDATA}\MetaQuotes\Terminal\Common\Files
 
+# Trading terminals by target. demo = the existing BlackBull install (logged into the demo).
+# live = a separate portable copy (scripts/setup_terminal.py live), logged in by the user, so
+# demo history stays readable and neither account can touch the other. On a VPS, point these
+# at the VPS paths.
+terminals:
+  demo:
+    install_dir: C:\Program Files\BlackBull Markets MT5
+    portable: false
+  live:
+    install_dir: runtime\live
+    portable: true
+
 tester:
   # Portable copy used exclusively for Strategy Tester runs (created by scripts/setup_tester.py).
   install_dir: runtime\tester

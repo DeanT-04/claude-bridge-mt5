@@ -28,19 +28,21 @@ class MT5Error(RuntimeError):
 
 
 @contextmanager
-def session():
-    """The MT5 package holds one global connection; serialise access to it."""
+def session(target: str = "demo"):
+    """Connect to the demo or live terminal. The MT5 package holds one global connection, so
+    access is serialised. Market data always comes from the demo terminal (the default)."""
+    exe, portable = config.target_terminal(target)
     with _lock:
-        if not mt5.initialize(path=str(config.terminal_exe())):
-            raise MT5Error(f"initialize failed: {mt5.last_error()}")
+        if not mt5.initialize(path=str(exe), portable=portable):
+            raise MT5Error(f"initialize {target} terminal failed: {mt5.last_error()}")
         try:
             yield mt5
         finally:
             mt5.shutdown()
 
 
-def account_info() -> dict:
-    with session():
+def account_info(target: str = "demo") -> dict:
+    with session(target):
         a = mt5.account_info()
         if a is None:
             raise MT5Error(f"account_info: {mt5.last_error()}")

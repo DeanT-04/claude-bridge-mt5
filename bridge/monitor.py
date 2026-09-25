@@ -16,12 +16,12 @@ from . import config, deploy, mt5_client
 MAGIC_SPAN = 100000
 
 
-def sleeve_trades(days: int = 365) -> dict[int, list[dict]]:
-    """Closed QB_Host positions from the connected terminal's history, keyed by sleeve id."""
+def sleeve_trades(days: int = 365, target: str = "demo") -> dict[int, list[dict]]:
+    """Closed QB_Host positions from the target terminal's history, keyed by sleeve id."""
     base = config.settings()["deployment"]["magic_base"]
     now = datetime.now(timezone.utc)
     out: dict[int, list[dict]] = {}
-    with mt5_client.session():
+    with mt5_client.session(target):
         deals = mt5.history_deals_get(now - timedelta(days=days), now + timedelta(days=1)) or ()
         by_pos: dict[int, list] = {}
         for d in deals:
@@ -88,12 +88,12 @@ def first_deployed(target: str, sleeve_id: int, con) -> datetime | None:
 def forward_report(target: str = "demo", con=None) -> dict:
     con = con or db.connect()
     lim = config.settings()["deployment"]
-    acct = mt5_client.account_info()
+    acct = mt5_client.account_info(target)
     if acct["is_demo"] != (target == "demo"):
         raise RuntimeError(f"the connected terminal is on a {'demo' if acct['is_demo'] else 'live'} account; "
                            f"a {target} report needs the {target} terminal")
     port = deploy.current(target, con)
-    trades = sleeve_trades()
+    trades = sleeve_trades(target=target)
     now = datetime.now(timezone.utc)
     rows = []
     for s in port.sleeves:
