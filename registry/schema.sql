@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS universe (
     symbol          TEXT PRIMARY KEY,
     grp             TEXT,
     researchable    INTEGER,
-    small_account   INTEGER,
     metrics         TEXT,           -- JSON from research.universe.scan
     updated         TEXT
 );

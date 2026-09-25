@@ -14,11 +14,11 @@ OPT_XML = b"""<?xml version="1.0"?>
 
 
 def test_ini_contains_account_and_inputs():
-    job = tester.Job("QB\\QB_Donchian.ex5", "XAUUSD", "H1", date(2020, 1, 1), date(2024, 1, 1),
+    job = tester.Job("QB\\QB_Rules.ex5", "XAUUSD", "H1", date(2020, 1, 1), date(2024, 1, 1),
                      params={"InpChannel": tester.Param(20, 10, 5, 60), "InpSlAtr": tester.Param(2.0)},
-                     optimisation="genetic", tag="abc", deposit=100, currency="GBP")
+                     optimisation="genetic", tag="abc", deposit=50000, currency="USD")
     ini = job.ini_text()
-    assert "Deposit=100" in ini and "Currency=GBP" in ini and "Leverage=1:100" in ini
+    assert "Deposit=50000" in ini and "Currency=USD" in ini and "Leverage=1:100" in ini
     assert "Optimization=2" in ini and "Model=1" in ini
     assert "InpChannel=20||10||5||60||Y" in ini and "InpSlAtr=2||2||0||2||N" in ini
     assert "InpRunTag=abc\r\n" in ini

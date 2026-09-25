@@ -1,4 +1,4 @@
-"""Python twin of mql5/Experts/QB/QB_Donchian.mq5 — keep the rules in sync."""
+"""Python twin of CSigDonchian (mql5/Include/QB/Signals.mqh, QB_Rules family 0) — keep in sync."""
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
@@ -7,7 +7,7 @@ import numpy as np
 
 from ..engine import Costs, atr_sma, server_hour, simulate
 
-EXPERT = "QB\\QB_Rules.ex5"   # runs as QB_Rules family 0 (QB_Donchian.mq5 is legacy)
+EXPERT = "QB\\QB_Rules.ex5"   # runs as QB_Rules family 0
 fid = 0   # ENUM_QB_FAMILY value in Signals.mqh (QB_Host runs it as a sleeve)
 
 

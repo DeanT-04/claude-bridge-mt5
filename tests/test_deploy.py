@@ -39,17 +39,19 @@ def test_apply_rejects_wrong_sha_and_stale_base(env):
         deploy.apply(p1["proposal_id"], p1["sha256"], con=con)
 
 
-def test_unvalidated_needs_flag_and_never_live(env, monkeypatch):
+def test_unvalidated_needs_flag_and_never_goes_to_a_prop_account(env, monkeypatch):
     con, _, g_fail = env
     with pytest.raises(ValueError):
         deploy.propose("demo", add_gauntlets=[g_fail], con=con)
     p = deploy.propose("demo", add_gauntlets=[g_fail], allow_unvalidated=True, con=con)
     assert p["unvalidated"] == [1] and p["sleeves"][0]["risk_pct"] == 0.5
-    with pytest.raises(PermissionError):     # live disabled in settings
-        deploy.propose("live", add_gauntlets=[g_fail], allow_unvalidated=True, con=con)
-    monkeypatch.setitem(config.settings()["account"], "live_enabled", True)
-    with pytest.raises(PermissionError):     # still refused: unvalidated on live
-        deploy.propose("live", add_gauntlets=[g_fail], allow_unvalidated=True, con=con)
+    monkeypatch.setitem(config.settings()["terminals"], "prop_x", {"install_dir": "x", "portable": True,
+                                                                   "profile": "ftmo_2step", "size": 50000})
+    with pytest.raises(PermissionError):     # prop target not enabled by the user
+        deploy.propose("prop_x", add_gauntlets=[g_fail], allow_unvalidated=True, con=con)
+    monkeypatch.setitem(config.settings()["account"], "enabled_targets", ["prop_x"])
+    with pytest.raises(PermissionError):     # still refused: unvalidated on a prop account
+        deploy.propose("prop_x", add_gauntlets=[g_fail], allow_unvalidated=True, con=con)
 
 
 def test_readding_same_strategy_keeps_sleeve_id_and_remove_works(env):

@@ -3,8 +3,7 @@
 //+------------------------------------------------------------------+
 #property strict
 
-// Scale applied to balance before sizing. Used on the USD 1000 demo so a trade
-// risks the same fraction the GBP 100 live account would (see settings.yaml).
+// Scale applied to equity before sizing (1.0 = size on the account's own equity).
 input double InpBalanceScale = 1.0;
 
 int g_qb_skipped_minlot = 0;   // trades skipped because min lot exceeds the risk cap

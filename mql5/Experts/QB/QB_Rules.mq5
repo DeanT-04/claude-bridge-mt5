@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| QB_Rules: one EA for every rule-based signal family.             |
-//| Execution identical to QB_Donchian / research/engine.py:          |
+//| Execution identical to QB_Host and research/engine.py:           |
 //|  - new bar only; time exit first (held >= InpMaxBars)             |
 //|  - entry at bar open when flat, in session and the signal fires   |
 //|  - SL = InpSlAtr*ATR[1], TP = InpTpAtr*ATR[1] (ATR = SMA of TR)   |

@@ -14,9 +14,7 @@ from .strategies import FAMILIES, get_family
 
 PARITY_MIN_MATCH = 0.85      # share of trades matched by entry bar + direction
 PARITY_MAX_R_MAE = 0.15      # mean abs R difference on matched trades
-# Parity/stress compare trade lists, which don't depend on account size. A large notional
-# deposit stops the min-lot guard skipping trades (small-account feasibility is checked separately).
-NOTIONAL_DEPOSIT = 100_000
+# Parity/stress compare trade lists; they run at the research account size (settings, 50K).
 # Tester M1 history on BlackBull is short (e.g. XAUUSD from 2022-12), so confirm on recent years only.
 CONFIRM_YEARS = 3
 
@@ -70,8 +68,7 @@ def make(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
         inputs = {k: tester.Param(v) for k, v in params.dict().items()}
         inputs["InpRiskPct"] = tester.Param(1.0)
 
-        base = tester.run(tester.Job(fam.EXPERT, symbol, timeframe, d0, d1, params=dict(inputs),
-                                      deposit=NOTIONAL_DEPOSIT))
+        base = tester.run(tester.Job(fam.EXPERT, symbol, timeframe, d0, d1, params=dict(inputs)))
         if not base.ok:
             return {"pass": False, "stage": "mt5_backtest", "error": base.error}
         a = int(np.searchsorted(bars["time"], t_from))
@@ -82,7 +79,7 @@ def make(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
         cs = g["cost_stress"]
         med_spread = max(int(np.median(bars["spread"][a:])), int(spec.get("spread", 0)))
         stressed = tester.run(tester.Job(fam.EXPERT, symbol, timeframe, d0, d1, params=dict(inputs),
-                                         deposit=NOTIONAL_DEPOSIT, spread=int(round(med_spread * cs["spread_mult"]))
+                                         spread=int(round(med_spread * cs["spread_mult"]))
                                          + int(cs["extra_slippage_points"])))
         r = mt5_r(stressed.trades) if stressed.ok else np.zeros(0)
         pf = float(r[r > 0].sum() / -r[r < 0].sum()) if (r < 0).any() else 0.0

@@ -20,15 +20,30 @@ from registry import db
 from . import config
 
 def targets() -> tuple[str, ...]:
-    """Deployment targets = configured terminals (demo, live, and any prop accounts)."""
-    return tuple(config.settings().get("terminals", {"demo": {}, "live": {}}))
+    """Deployment targets = configured terminals: 'demo' plus one per prop account."""
+    return tuple(config.settings().get("terminals", {"demo": {}}))
 
 
 def account_mode(target: str) -> str:
-    """What QB_Host must see: 'demo' or 'live'. Prop challenges often run on demo-mode servers."""
-    if target in ("demo", "live"):
-        return target
+    """Account type QB_Host must see: 'demo' or 'live' (most prop challenges are demo-mode)."""
+    if target == "demo":
+        return "demo"
     return config.settings()["terminals"][target].get("account_mode", "demo")
+
+
+def target_profile(target: str) -> str:
+    """The prop program (config/propfirms.yaml) a target terminal is for ('' for demo)."""
+    if target == "demo":
+        return ""
+    return config.settings()["terminals"][target].get("profile", "")
+
+
+def target_size(target: str) -> float | None:
+    """The challenge account size chosen for a prop target (terminals.<target>.size)."""
+    if target == "demo":
+        return None
+    v = config.settings()["terminals"][target].get("size")
+    return float(v) if v else None
 
 
 @dataclass
@@ -100,10 +115,7 @@ def _check_target(target: str) -> None:
     if target not in targets():
         raise ValueError(f"target must be one of {targets()}")
     acc = config.settings()["account"]
-    if target == "live" and not acc.get("live_enabled"):
-        raise PermissionError("live deployment is disabled: set account.live_enabled: true in "
-                              "config/settings.yaml yourself once a live account is logged in")
-    if target not in ("demo", "live") and target not in (acc.get("enabled_targets") or []):
+    if target != "demo" and target not in (acc.get("enabled_targets") or []):
         raise PermissionError(f"target {target!r} is disabled: add it to account.enabled_targets in "
                               "config/settings.yaml yourself once that account is logged in")
 
@@ -148,17 +160,21 @@ def sleeve_from_gauntlet(g: dict, sleeve_id: int, allow_unvalidated: bool) -> Sl
                   gauntlet_id=g["id"], validated=validated)
 
 
-def apply_prop_profile(p: Portfolio, name: str) -> None:
+def apply_prop_profile(p: Portfolio, name: str, size: float | None = None) -> None:
     """Copy a prop profile's rules into the host config, tightened by prop_safety_buffer so the
-    EA stops before the firm's own limit is touched ("" clears prop rules)."""
+    EA stops before the firm's own limit is touched ("" clears prop rules). size = the
+    challenge's initial balance (default: the target's configured size, else the research size)."""
     if not name:
         p.prop_profile, p.prop_initial_balance = "", 0.0
         return
     from research.propfirm import profiles
     prof = profiles()[name]
+    size = size or target_size(p.target) or prof.default_size()
+    if size not in prof.size_options():
+        raise ValueError(f"{prof.firm} {prof.program} doesn't offer {size:.0f}; sizes: {prof.size_options()}")
     buf = config.settings()["deployment"].get("prop_safety_buffer", 0.8)
     p.prop_profile = name
-    p.prop_initial_balance = prof.account_size
+    p.prop_initial_balance = size
     p.max_daily_loss_pct = round(prof.max_daily_loss_pct * buf, 3)
     p.max_total_dd_pct = round(prof.max_total_dd_pct * buf, 3)
     p.daily_loss_basis = prof.daily_loss_basis
@@ -168,17 +184,12 @@ def apply_prop_profile(p: Portfolio, name: str) -> None:
     p.balance_scale = 1.0
 
 
-def demo_balance_scale(account: dict, rate_target_to_acct: float) -> float:
-    """Scale demo equity so position sizes match the target account (e.g. £100 on a $1000 demo)."""
-    target_in_acct = config.settings()["account"]["deposit"] * rate_target_to_acct
-    return round(target_in_acct / account["equity"], 6) if account["equity"] > 0 else 1.0
-
-
 # ------------------------------------------------------------------ propose / apply / kill
 def propose(target: str, add_gauntlets: list[int] | None = None, remove_sleeves: list[int] | None = None,
             allow_unvalidated: bool = False, enabled: bool = True, limits: dict | None = None,
             balance_scale: float | None = None, reset_halt: bool = False, note: str = "",
-            add_sleeves: list[Sleeve] | None = None, prop_profile: str | None = None, con=None) -> dict:
+            add_sleeves: list[Sleeve] | None = None, prop_profile: str | None = None,
+            prop_size: float | None = None, con=None) -> dict:
     _check_target(target)
     con = con or db.connect()
     if allow_unvalidated and target != "demo":
@@ -205,8 +216,10 @@ def propose(target: str, add_gauntlets: list[int] | None = None, remove_sleeves:
         setattr(new, k, float(v))
     if balance_scale is not None:
         new.balance_scale = balance_scale
+    if prop_profile is None and target != "demo" and not new.prop_profile:
+        prop_profile = target_profile(target)     # a prop terminal enforces its own program's rules
     if prop_profile is not None:
-        apply_prop_profile(new, prop_profile)
+        apply_prop_profile(new, prop_profile, prop_size)
     if target != "demo" and any(not s.validated for s in new.sleeves):
         raise PermissionError(f"every {target} sleeve must have passed the gauntlet")
     new.enabled = enabled
@@ -239,7 +252,7 @@ def apply(proposal_id: int, sha256: str, con=None) -> dict:
         raise ValueError("sha256 does not match the proposal the user reviewed")
     meta = json.loads(r["sleeves"])
     if _sha(_file_text(r["target"])) != meta["base_sha"]:
-        raise RuntimeError("the live config changed since this proposal was made; propose again")
+        raise RuntimeError("the running config changed since this proposal was made; propose again")
     _atomic_write(config_path(r["target"]), r["config"])
     con.execute("UPDATE deployments SET status='superseded' WHERE target=? AND status IN ('applied','kill')",
                 (r["target"],))

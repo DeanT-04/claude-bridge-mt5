@@ -89,9 +89,10 @@ def forward_report(target: str = "demo", con=None) -> dict:
     con = con or db.connect()
     lim = config.settings()["deployment"]
     acct = mt5_client.account_info(target)
-    if acct["is_demo"] != (target == "demo"):
-        raise RuntimeError(f"the connected terminal is on a {'demo' if acct['is_demo'] else 'live'} account; "
-                           f"a {target} report needs the {target} terminal")
+    expected_demo = deploy.account_mode(target) == "demo"
+    if acct["is_demo"] != expected_demo:
+        raise RuntimeError(f"the {target} terminal is on a {'demo' if acct['is_demo'] else 'live'} account, "
+                           f"but settings expect {deploy.account_mode(target)}")
     port = deploy.current(target, con)
     trades = sleeve_trades(target=target)
     now = datetime.now(timezone.utc)
@@ -109,14 +110,17 @@ def forward_report(target: str = "demo", con=None) -> dict:
                      "sum_r": float(r.sum()) if len(r) else 0.0,
                      "mean_r": float(r.mean()) if len(r) else None,
                      "profit_factor": float(wins / losses) if losses > 0 else None,
-                     "profit": float(sum(t["profit"] for t in tr)), "drift": d, "ready_for_live": bool(ready)})
+                     "profit": float(sum(t["profit"] for t in tr)), "drift": d, "ready_for_prop": bool(ready)})
     return {"target": target, "version": port.version, "enabled": port.enabled,
             "host": deploy.host_status(target), "sleeves": rows}
 
 
-def promote_to_live(sleeve_ids: list[int], force: bool = False, con=None) -> dict:
-    """Propose a live config containing the chosen demo sleeves. Needs live_enabled, validated
-    sleeves, and (unless force) a passing forward test. Still needs apply() approval after."""
+def promote(sleeve_ids: list[int], target: str, force: bool = False, con=None) -> dict:
+    """Propose a prop-account config containing the chosen demo sleeves. Needs the target in
+    account.enabled_targets, validated sleeves, and (unless force) a passing demo forward test.
+    The target's prop profile rules are applied. Still needs apply() approval after."""
+    if target == "demo":
+        raise ValueError("promote copies demo sleeves to a prop target, not to demo")
     con = con or db.connect()
     report = forward_report("demo", con)
     chosen = [row for row in report["sleeves"] if row["sleeve"]["id"] in set(sleeve_ids)]
@@ -126,10 +130,10 @@ def promote_to_live(sleeve_ids: list[int], force: bool = False, con=None) -> dic
     for row in chosen:
         if not row["sleeve"]["validated"]:
             raise PermissionError(f"sleeve {row['sleeve']['id']} never passed the gauntlet")
-        if not row["ready_for_live"] and not force:
+        if not row["ready_for_prop"] and not force:
             raise PermissionError(f"sleeve {row['sleeve']['id']} has not passed its forward test "
                                   f"({row['trades']} trades, {row['days_live']} days, drift {row['drift']})")
     sleeves = [deploy.Sleeve(**row["sleeve"]) for row in chosen]
-    return deploy.propose("live", add_sleeves=sleeves, balance_scale=1.0,
+    return deploy.propose(target, add_sleeves=sleeves, balance_scale=1.0,
                           note=f"promote demo sleeves {sorted(sleeve_ids)}" + (" (forced)" if force else ""),
                           con=con)

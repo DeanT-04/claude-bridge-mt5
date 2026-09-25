@@ -43,7 +43,7 @@ class Param:
 
 @dataclass
 class Job:
-    expert: str                     # e.g. "QB\\QB_Donchian.ex5" relative to MQL5\Experts
+    expert: str                     # e.g. "QB\\QB_Rules.ex5" relative to MQL5\Experts
     symbol: str
     period: str                     # M15/H1/...
     date_from: date

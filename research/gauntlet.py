@@ -76,29 +76,13 @@ def costs_for(spec: dict, spread_mult: float = 1.0, slip: float = 0.0, floor: bo
                  min_spread_points=float(spec.get("spread", 0)) if floor else 0.0)
 
 
-def acct_to_target_rate(get_spec, acct_ccy: str, target_ccy: str) -> float:
-    """Multiply terminal-account-currency amounts by this to express them in the target currency."""
-    if acct_ccy == target_ccy:
-        return 1.0
-    for sym, invert in ((target_ccy + acct_ccy, True), (acct_ccy + target_ccy, False)):
-        try:
-            s = get_spec(sym)
-        except Exception:
-            continue
-        px = s.get("bid") or s.get("price")
-        if px:
-            return 1.0 / px if invert else px
-    raise RuntimeError(f"no conversion rate {acct_ccy}->{target_ccy}")
-
-
-def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, acct_rate: float = 1.0,
+def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict,
         con=None, mt5_confirm=None, progress=print) -> dict:
-    """Run the full gauntlet. `mt5_confirm(params, from, to) -> dict` is optional (M1 wiring)."""
+    """Run the full gauntlet. `mt5_confirm(params, from, to) -> dict` is optional."""
     fam = get_family(family)
     # Generated strategies share one multiple-testing pool per symbol/timeframe.
     trial_key = getattr(fam, "trial_key", family)
     g = config.gauntlet()
-    acc = config.settings()["account"]
     con = con or db.connect()
     costs = costs_for(spec)
     stages: dict[str, dict] = {}
@@ -235,16 +219,23 @@ def run(family: str, symbol: str, timeframe: str, bars: np.ndarray, spec: dict, 
                                     and (not bcfg["beat_buy_hold"] or m["sharpe"] > bh),
                             "random_entry": rnd, "buy_hold_sharpe": bh, "strategy_sharpe": m["sharpe"]}
 
-    # ---- 7. small-account feasibility --------------------------------------------------
-    stops = np.array([t.stop_dist for t in oos_trades])
-    feas = sizing.feasibility(spec, stops, risk or g["sizing"]["max_risk_pct"] / 100,
-                              acc["deposit"], acct_rate)
-    stages["small_account"] = {"pass": True, "informational": True, **feas,
-                               "note": "fails here mark the candidate 'larger/prop account only'"}
-
     core = ["walk_forward", "neighbourhood", "deflated_sharpe", "sizing_montecarlo",
             "cost_stress", "benchmarks"]
     all_pass = all(stages[s]["pass"] for s in core)
+
+    # ---- 7. prop challenges (informational for now; gating comes in plan P1) ------------
+    # Uses the walk-forward OOS trades, never the tuned final params, so it isn't in-sample.
+    if all_pass:
+        from . import propfirm
+        days = propfirm.trade_days(oos_trades)
+        active = min(len(days) / max(oos_span * 5 / 7, 1), 1.0)
+        ranked = propfirm.rank_programs(days, active, runs=800)
+        stages["prop"] = {"pass": True, "informational": True,
+                          "programs": [{"profile": r["profile"], "pass_prob": r["best"]["pass_prob"],
+                                        "risk_pct": r["best"]["risk_pct"],
+                                        "median_days": r["best"]["median_days_to_pass"],
+                                        "cost_per_pass": r["cost_per_pass"],
+                                        "fee_currency": r["fee_currency"], "size": r["size"]} for r in ranked]}
 
     # ---- 8. holdout (once per candidate, only if everything else passed) ---------------
     cand = db.candidate_hash(family, symbol, timeframe, final.dict())

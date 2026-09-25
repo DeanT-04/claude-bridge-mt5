@@ -29,8 +29,8 @@ class MT5Error(RuntimeError):
 
 @contextmanager
 def session(target: str = "demo"):
-    """Connect to the demo or live terminal. The MT5 package holds one global connection, so
-    access is serialised. Market data always comes from the demo terminal (the default)."""
+    """Connect to a target's terminal (demo or a prop account). The MT5 package holds one global
+    connection, so access is serialised. Market data always comes from the demo terminal."""
     exe, portable = config.target_terminal(target)
     with _lock:
         if not mt5.initialize(path=str(exe), portable=portable):

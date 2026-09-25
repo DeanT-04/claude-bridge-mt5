@@ -2,9 +2,9 @@
 # Rewrites portfolio_<target>.cfg with enabled=0; QB_Host notices within a second, closes every
 # QB position and stops trading. Re-enabling needs a new approved proposal.
 #
-#   powershell -ExecutionPolicy Bypass -File scripts\kill_switch.ps1 live
+#   powershell -ExecutionPolicy Bypass -File scripts\kill_switch.ps1 ftmo_50k
 #   powershell -ExecutionPolicy Bypass -File scripts\kill_switch.ps1 demo
-param([ValidateSet("demo", "live")][string]$Target = "live")
+param([Parameter(Mandatory = $true)][string]$Target)
 
 $cfg = Join-Path $env:APPDATA "MetaQuotes\Terminal\Common\Files\QB\portfolio_$Target.cfg"
 if (-not (Test-Path $cfg)) { Write-Host "No $Target config at $cfg - nothing is deployed."; exit 0 }

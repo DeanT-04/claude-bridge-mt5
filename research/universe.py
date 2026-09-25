@@ -3,9 +3,9 @@
 For each tradable symbol, from the last ~2 years of H1 bars:
   * history_years   – depth of H1 history available
   * cost_atr        – median spread / median ATR(14) on H1 (round-trip cost in ATR units)
-  * minlot_risk_pct – % of the target account (£100) lost by the minimum lot at a 1.5×ATR stop
-A symbol is 'researchable' when costs are low enough and history is deep enough, and
-'small_account' when its minimum lot also fits the target account's risk cap.
+  * minlot_risk_pct – % of the research account (50K) lost by the minimum lot at a 1.5×ATR stop
+A symbol is 'researchable' when costs are low enough and history is deep enough. Data and costs
+come from BlackBull, used as the proxy for every prop firm's feed.
 """
 from __future__ import annotations
 
@@ -40,7 +40,6 @@ def _rate_to_target(acct_ccy: str, target: str) -> float:
 def scan(groups: list[str] | None = None, include_equities: bool = False, progress=print) -> list[dict]:
     groups = list(groups or DEFAULT_GROUPS) + (["Equities"] if include_equities else [])
     acc = config.settings()["account"]
-    sizing = config.gauntlet()["sizing"]
     out = []
     with mt5_client.session():
         rate = _rate_to_target(mt5.account_info().currency, acc["currency"])
@@ -72,11 +71,10 @@ def scan(groups: list[str] | None = None, include_equities: bool = False, progre
                 "volume_min": s.volume_min, "bars_per_day": round(len(recent) / 730 * 7 / 5, 1),
             }
             row["researchable"] = bool(row["cost_atr"] <= MAX_COST_ATR and years >= MIN_HISTORY_YEARS)
-            row["small_account"] = bool(row["researchable"] and risk_pct <= sizing["max_risk_pct"])
             out.append(row)
             if k % 25 == 0:
                 progress(f"  {k}/{len(syms)}")
-    out.sort(key=lambda r: (not r["researchable"], not r["small_account"], r["cost_atr"]))
+    out.sort(key=lambda r: (not r["researchable"], r["cost_atr"]))
     save(out)
     return out
 
@@ -84,19 +82,16 @@ def scan(groups: list[str] | None = None, include_equities: bool = False, progre
 def save(rows: list[dict], con=None) -> None:
     con = con or db.connect()
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    con.executemany("INSERT OR REPLACE INTO universe(symbol, grp, researchable, small_account, metrics, updated) "
-                    "VALUES (?,?,?,?,?,?)",
-                    [(r["symbol"], r["group"], int(r["researchable"]), int(r["small_account"]),
-                      json.dumps(r), now) for r in rows])
+    con.executemany("INSERT OR REPLACE INTO universe(symbol, grp, researchable, metrics, updated) "
+                    "VALUES (?,?,?,?,?)",
+                    [(r["symbol"], r["group"], int(r["researchable"]), json.dumps(r), now) for r in rows])
     con.commit()
 
 
-def load(researchable_only: bool = True, small_account_only: bool = False, con=None) -> list[dict]:
+def load(researchable_only: bool = True, con=None) -> list[dict]:
     con = con or db.connect()
     q = "SELECT metrics FROM universe WHERE 1=1"
     if researchable_only:
         q += " AND researchable=1"
-    if small_account_only:
-        q += " AND small_account=1"
     rows = [json.loads(r["metrics"]) for r in con.execute(q)]
     return sorted(rows, key=lambda r: r["cost_atr"])

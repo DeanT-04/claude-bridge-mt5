@@ -1,10 +1,13 @@
-"""Create a portable copy of the BlackBull terminal for a target ('live' or 'tester').
+"""Create a portable terminal copy for a target: a prop account from settings.terminals, or 'tester'.
 
-python scripts/setup_terminal.py live
+python scripts/setup_terminal.py ftmo_50k
+python scripts/setup_terminal.py tester
 
 The copy runs with /portable, so its data (MQL5, history, logins) lives inside its own folder.
-Afterwards, launch it once, log into the account yourself (Claude never types passwords), then run
-the MCP tool install_host(target='live') and attach QB_Host with InpConfig=portfolio_live.cfg.
+For a prop account, install the FIRM's MT5 terminal build if it provides one (its server list),
+or add the firm's server in this copy. Launch it once and log in yourself (Claude never types
+passwords), then run the MCP tool install_host(target=...) and attach QB_Host with
+InpConfig=portfolio_<target>.cfg.
 """
 import shutil
 import sys
@@ -39,4 +42,6 @@ def main(target: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "live")
+    if len(sys.argv) < 2:
+        raise SystemExit("usage: python scripts/setup_terminal.py <target|tester>")
+    main(sys.argv[1])

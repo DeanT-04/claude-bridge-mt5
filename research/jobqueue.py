@@ -7,7 +7,6 @@ import multiprocessing as mp
 import traceback
 from datetime import datetime, timezone
 
-from bridge import config, mt5_client
 from registry import db
 
 from . import data, gauntlet
@@ -65,19 +64,18 @@ def survivors(con=None) -> list[dict]:
                     "oos_sharpe": oos.get("sharpe"), "oos_pf": oos.get("profit_factor"),
                     "oos_trades": oos.get("trades"),
                     "risk": st.get("sizing_montecarlo", {}).get("risk"),
-                    "small_account": st.get("small_account", {}).get("feasible")})
+                    "best_prop": (st.get("prop", {}).get("programs") or [None])[0]})
     return out
 
 
 # ------------------------------------------------------------------ workers
-def _prefetch(con) -> float:
-    """Load bars/specs for every queued combo in this (MT5-connected) process."""
+def _prefetch(con) -> None:
+    """Load bars/specs for every queued combo in this (MT5-connected) process, so workers
+    never need the terminal connection."""
     rows = con.execute("SELECT DISTINCT symbol, timeframe FROM jobs WHERE status='queued'").fetchall()
     for r in rows:
         data.bars(r["symbol"], r["timeframe"])
         data.spec(r["symbol"])
-    acct = mt5_client.account_info()["currency"]
-    return gauntlet.acct_to_target_rate(data.spec, acct, config.settings()["account"]["currency"])
 
 
 def _claim(con):
@@ -86,7 +84,7 @@ def _claim(con):
         "(SELECT id FROM jobs WHERE status='queued' ORDER BY id LIMIT 1) RETURNING *", (_now(),)).fetchone()
 
 
-def _worker(rate: float) -> int:
+def _worker(_: int) -> int:
     con = db.connect()
     done = 0
     while True:
@@ -105,7 +103,7 @@ def _worker(rate: float) -> int:
                 con.execute("UPDATE jobs SET status='done', verdict=?, finished=? WHERE id=?",
                             (f"evolved:{len(picks)}", _now(), job["id"]))
             else:
-                res = gauntlet.run(job["family"], job["symbol"], job["timeframe"], bars, spec, rate,
+                res = gauntlet.run(job["family"], job["symbol"], job["timeframe"], bars, spec,
                                    con=con, progress=lambda *_: None)
                 con.execute("UPDATE jobs SET status='done', gauntlet_id=?, verdict=?, finished=? WHERE id=?",
                             (res["id"], res["verdict"], _now(), job["id"]))
@@ -120,10 +118,10 @@ def run(processes: int = 3, mt5_confirm: bool = True, progress=print) -> dict:
     con = db.connect()
     con.execute("UPDATE jobs SET status='queued' WHERE status='running'")   # recover a crashed run
     con.commit()
-    rate = _prefetch(con)
+    _prefetch(con)
     progress(f"prefetched data; starting {processes} workers")
     with mp.get_context("spawn").Pool(processes) as pool:
-        done = sum(pool.map(_worker, [rate] * processes))
+        done = sum(pool.map(_worker, range(processes)))
     progress(f"python gauntlets done: {done} jobs")
     confirmed = confirm_pending(con, progress) if mt5_confirm else []
     return {**status(con), "mt5_confirmed": confirmed}

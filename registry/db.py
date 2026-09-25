@@ -19,8 +19,16 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     con = sqlite3.connect(p, timeout=60)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")      # several research workers write concurrently
+    _migrate(con)
     con.executescript(SCHEMA.read_text())
     return con
+
+
+def _migrate(con) -> None:
+    """The universe table is a rebuildable cache; drop the pre-prop layout (small_account column)."""
+    cols = [r[1] for r in con.execute("PRAGMA table_info(universe)")]
+    if "small_account" in cols:
+        con.execute("DROP TABLE universe")
 
 
 def candidate_hash(family: str, symbol: str, timeframe: str, params: dict) -> str:

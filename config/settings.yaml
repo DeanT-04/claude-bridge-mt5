@@ -1,60 +1,58 @@
 # All paths are overridable so the stack can move to a VPS unchanged.
 terminal:
+  # BlackBull install: source of market data (research proxy for every prop firm's feed).
   install_dir: C:\Program Files\BlackBull Markets MT5
-  # Data dir of the live/demo terminal (where MQL5\ sources get synced for the host EA).
+  # Data dir of that terminal (QB sources are synced into its MQL5\ for the demo host EA).
   data_dir: ${APPDATA}\MetaQuotes\Terminal\16D9C17040576AD13C62C316983027D5
   common_files: ${APPDATA}\MetaQuotes\Terminal\Common\Files
 
-# Trading terminals by target. demo = the existing BlackBull install (logged into the demo).
-# live = a separate portable copy (scripts/setup_terminal.py live), logged in by the user, so
-# demo history stays readable and neither account can touch the other. On a VPS, point these
-# at the VPS paths.
+# Trading terminals by deployment target. `demo` = the BlackBull install (forward tests).
+# Each prop account gets its OWN portable terminal (scripts/setup_terminal.py <name>), logged in
+# by the user, with `profile` naming its program in config/propfirms.yaml and `account_mode`
+# telling QB_Host what account type to expect (most challenge accounts are demo-mode).
 terminals:
-  demo:
+  demo:                           # BlackBull demo (USD 10,000, 1:100) for forward tests
     install_dir: C:\Program Files\BlackBull Markets MT5
     portable: false
-  live:
-    install_dir: runtime\live
-    portable: true
-  # Example prop target (uncomment, run scripts/setup_terminal.py prop_example, log in yourself):
-  # prop_example:
-  #   install_dir: runtime\prop_example
+  # Example (uncomment, run scripts/setup_terminal.py ftmo_50k, log in yourself, then add it
+  # to account.enabled_targets):
+  # ftmo_50k:
+  #   install_dir: runtime\ftmo_50k
   #   portable: true
-  #   account_mode: demo        # many challenge accounts are demo-mode on the firm's server
+  #   account_mode: demo          # most challenge accounts are demo-mode on the firm's server
+  #   profile: ftmo_2step         # program key in config/propfirms.yaml
+  #   size: 50000                 # one of that program's sizes
+  #   ea_approved: false          # firms that require EA approval (FXIFY): set true once granted
 
 tester:
-  # Portable copy used exclusively for Strategy Tester runs (created by scripts/setup_tester.py).
+  # Portable copy used exclusively for Strategy Tester runs (scripts/setup_terminal.py tester).
   install_dir: runtime\tester
   timeout_sec: 7200
-  # The tester needs <base><deposit ccy> crosses (e.g. XAUGBP) with full history to test in GBP;
-  # BlackBull's are short, so tests run in USD with the target deposit converted at today's rate.
   currency: USD
 
+# The account every backtest models (default challenge size; rules are %-based, so pass
+# probabilities hold for every size, while fees and min-lot limits depend on it).
 account:
-  # Backtests model the real target account, not the demo.
-  deposit: 100
-  currency: GBP
+  deposit: 50000
+  currency: USD
   leverage: 100
-  # Demo is USD 1000; demo lot sizing is scaled so risk % mirrors the live target.
-  demo_scale_to_target: true
-  live_enabled: false
-  # Non-demo/live targets (e.g. prop challenges) you have logged in and allow deployment to.
+  # Prop targets (terminal names above) the user has logged in and allows deployment to.
   enabled_targets: []
 
 research:
   timeframes: [M15, M30, H1]
-  core_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD, XAGUSD, BTCUSD, ETHUSD, NAS100]
+  core_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD, NAS100, SPX500, US30, GER40, BTCUSD]
   history_start: 2019-01-01
   holdout_months: 12
 
 deployment:
-  # Written into portfolio_<target>.cfg and enforced by QB_Host itself.
-  max_daily_loss_pct: 5
-  max_total_dd_pct: 30
-  max_open_risk_pct: 6
-  # Risk used for demo forward-test sleeves that did not pass the gauntlet (allow_unvalidated).
+  # Defaults written into portfolio_<target>.cfg; a prop profile overrides them (tightened).
+  max_daily_loss_pct: 4
+  max_total_dd_pct: 8
+  max_open_risk_pct: 3
+  # Risk for demo forward-test sleeves that did not pass the gauntlet (allow_unvalidated).
   unvalidated_risk_pct: 0.5
-  # Forward-test bar before a sleeve may be promoted to live.
+  # Forward-test bar on demo before a sleeve may go to a prop account.
   promote_min_trades: 30
   promote_min_days: 28
   magic_base: 900000          # must match QB_Host InpMagicBase

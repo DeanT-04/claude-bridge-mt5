@@ -45,7 +45,7 @@ def terminal_exe() -> Path:
 
 
 def target_terminal(target: str) -> tuple[Path, bool]:
-    """(terminal64.exe path, portable flag) for 'demo' or 'live'."""
+    """(terminal64.exe path, portable flag) for a deployment target ('demo' or a prop terminal)."""
     t = settings().get("terminals", {}).get(target)
     if t is None:
         if target == "demo":

@@ -1,49 +1,239 @@
-# Generic prop-firm rule profiles. Percentages are of the INITIAL account balance unless noted.
-# Copy a profile and edit it to match a specific firm's published rules before using it.
+# Prop-firm challenge programs modelled by the pipeline: the five most-used forex/CFD MT5 firms
+# (by Trustpilot review volume, with FXIFY replacing the poorly rated The Funded Trader), 1-step
+# and 2-step evaluations only (instant funding is out of scope for now).
+# Researched 2026-09-25 from firm sites/help centres and review sites (see `sources`).
+# RULES AND PRICES CHANGE OFTEN: re-verify on the firm's own site before buying.
 #
-# daily_loss_basis: the daily limit is measured from the start-of-day ...
-#   balance | equity | max  (max = higher of balance and equity, the strictest common variant)
-# max_dd_mode: static   = floor at initial_balance × (1 − max_dd)
-#              trailing = floor trails the equity high-water mark (common on one-step accounts)
-# weekend_flat_hour: Friday server hour after which positions are closed (0 = allowed to hold)
-# news_blackout_min: no new entries within ± N minutes of high-impact news for the symbol's
-#   currencies (MT5 economic calendar; 0 = off)
+# Program fields
+#   sizes:                every account size offered, smallest -> largest, with its fee
+#                         (fee null = no reliable published figure; fee_currency applies to all)
+#   phase_targets:        profit target % per phase (2-step = two entries). Each phase restarts
+#                         from the initial balance with fresh limits.
+#   max_daily_loss_pct:   % of the INITIAL balance a single day may lose
+#   daily_loss_basis:     reference at the start of each day: balance | equity | max (higher)
+#   max_total_dd_pct:     % of the initial balance
+#   max_dd_mode:          static (floor fixed at initial - X%) | trailing (floor follows the
+#                         equity high); trailing_locks_at_initial: the trailing floor stops
+#                         rising once it reaches the initial balance
+#   min_trading_days:     per phase
+#   min_profitable_days:  days whose closed profit >= profitable_day_pct of initial (The5ers)
+#   best_day_max_share:   best day's profit <= this share of all positive days' profit when
+#                         passing (0 = no rule)
+#   max_days:             0 = unlimited (simulated up to 250 trading days)
+#   weekend_flat_hour:    Friday server hour after which positions must be flat (0 = may hold)
+#   news_blackout_min:    no trading within +/- N minutes of high-impact news (0 = allowed)
+#   leverage:             forex leverage on the account (lower on indices/metals/crypto)
+#   ea_policy:            what the firm says about expert advisors
+#   verify:               items the sources disagreed on or didn't state
 
-two_step_standard:
-  description: Classic two-phase evaluation (phase 1 shown; phase 2 usually 5% target)
-  account_size: 10000
-  profit_target_pct: 8
+ftmo_2step:
+  firm: FTMO
+  program: FTMO Challenge (2-step)
+  fee_currency: EUR
+  sizes:
+    - {size: 10000, fee: 155}        # one source lists EUR 89
+    - {size: 25000, fee: 250}
+    - {size: 50000, fee: 345}
+    - {size: 100000, fee: 540}
+    - {size: 200000, fee: 1080}
+  phase_targets: [10, 5]
+  max_daily_loss_pct: 5
+  daily_loss_basis: balance
+  max_total_dd_pct: 10
+  max_dd_mode: static
+  min_trading_days: 4
+  leverage: 100
+  ea_policy: allowed without approval; keep under 2,000 server requests per instrument per day
+  verify: [10K fee (EUR 89 vs 155), best-day rule scope on 2-step]
+  sources: [https://ftmo.com/en/trading-objectives/, https://brokeranalysis.com/prop-trading-firms/ftmo/pricing/]
+
+ftmo_1step:
+  firm: FTMO
+  program: FTMO 1-Step
+  fee_currency: USD
+  sizes:
+    - {size: 10000, fee: 79}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: null}
+    - {size: 100000, fee: 499}
+    - {size: 200000, fee: null}
+  phase_targets: [10]
+  max_daily_loss_pct: 3
+  daily_loss_basis: balance
+  max_total_dd_pct: 10
+  max_dd_mode: trailing
+  trailing_locks_at_initial: false
+  min_trading_days: 0
+  best_day_max_share: 0.5
+  leverage: 100
+  ea_policy: allowed without approval; keep under 2,000 server requests per instrument per day
+  verify: [whether the trailing floor locks at the initial balance, 25K/50K/200K fees]
+  sources: [https://ftmo.com/en/1-step-challenge/, https://propfirmkey.com/en/blog/ftmo-challenge-cost-2026]
+
+fundednext_stellar_2step:
+  firm: FundedNext
+  program: Stellar 2-Step
+  fee_currency: USD
+  sizes:
+    - {size: 6000, fee: 49.99}
+    - {size: 15000, fee: 119}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: 299}
+    - {size: 100000, fee: 529.99}
+    - {size: 200000, fee: 1049.99}
+  phase_targets: [8, 5]
+  max_daily_loss_pct: 5
+  daily_loss_basis: balance
+  max_total_dd_pct: 10
+  max_dd_mode: static
+  min_trading_days: 5
+  leverage: 100
+  ea_policy: allowed on MT4/MT5 (not cTrader/Match-Trader)
+  verify: [news and weekend rules, 25K fee]
+  sources: [https://fundednext.com/general-rules/cfds/trading-objectives,
+            https://help.fundednext.com/en/articles/8021076-what-rules-do-i-need-to-follow-in-the-stellar-2-step-challenge]
+
+fundednext_stellar_1step:
+  firm: FundedNext
+  program: Stellar 1-Step
+  fee_currency: USD
+  sizes:                              # priced the same as Stellar 2-Step
+    - {size: 6000, fee: 49.99}
+    - {size: 15000, fee: 119}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: 299}
+    - {size: 100000, fee: 529.99}
+    - {size: 200000, fee: 1049.99}
+  phase_targets: [10]
+  max_daily_loss_pct: 3
+  daily_loss_basis: balance
+  max_total_dd_pct: 6
+  max_dd_mode: static
+  min_trading_days: 2
+  leverage: 100
+  ea_policy: allowed on MT4/MT5 (not cTrader/Match-Trader)
+  verify: [news and weekend rules, 25K fee; fee refund only with the 3rd payout since 2026-01-12]
+  sources: [https://fundednext.com/general-rules/cfds/trading-objectives,
+            https://help.fundednext.com/en/articles/8021061-what-are-the-rules-for-the-stellar-1-step-challenge-at-fundednext]
+
+fundingpips_2step:
+  firm: FundingPips
+  program: 2-Step Standard
+  fee_currency: USD
+  sizes:
+    - {size: 5000, fee: null}
+    - {size: 10000, fee: null}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: 289}
+    - {size: 100000, fee: null}
+  phase_targets: [8, 5]
   max_daily_loss_pct: 5
   daily_loss_basis: max
   max_total_dd_pct: 10
   max_dd_mode: static
-  min_trading_days: 4
-  max_days: 0              # 0 = unlimited
-  weekend_flat_hour: 0
-  news_blackout_min: 0
-
-one_step_trailing:
-  description: Single-phase evaluation with trailing drawdown
-  account_size: 10000
-  profit_target_pct: 10
-  max_daily_loss_pct: 4
-  daily_loss_basis: max
-  max_total_dd_pct: 6
-  max_dd_mode: trailing
   min_trading_days: 3
-  max_days: 0
-  weekend_flat_hour: 22
-  news_blackout_min: 2
-
-instant_funded:
-  description: Funded from day one; no target, tight limits (simulated as survival over 60 days)
-  account_size: 5000
-  profit_target_pct: 0
-  max_daily_loss_pct: 3
-  daily_loss_basis: max
-  max_total_dd_pct: 6
-  max_dd_mode: trailing
-  min_trading_days: 0
-  max_days: 60
   weekend_flat_hour: 22
   news_blackout_min: 5
+  leverage: 100
+  ea_policy: own EAs only (source code proof); third-party EAs only as trade/risk managers
+  verify: [weekend auto-close time, losses re-entered within 10 min are combined (2% cap), fees]
+  sources: [https://help.fundingpips.com/hc/en-us/articles/34501809112081-2-Step-Standard,
+            https://tradetanto.com/learn/fundingpips-rules]
+
+fundingpips_1step_flex:
+  firm: FundingPips
+  program: 1 Step Flex (replaced the old 1-Step)
+  fee_currency: USD
+  sizes:
+    - {size: 5000, fee: null}
+    - {size: 10000, fee: null}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: null}
+    - {size: 100000, fee: null}
+  phase_targets: [12]
+  max_daily_loss_pct: 3
+  daily_loss_basis: max
+  max_total_dd_pct: 12
+  max_dd_mode: static
+  min_trading_days: 0
+  weekend_flat_hour: 22
+  news_blackout_min: 5
+  leverage: 100
+  ea_policy: own EAs only (source code proof); third-party EAs only as trade/risk managers
+  verify: [daily-loss basis, sizes and fees]
+  sources: [https://help.fundingpips.com/hc/en-us/articles/34501697434385-1-Step-Flex,
+            https://fundingpips.com/blog/fundingpips-1-step-flex]
+
+the5ers_highstakes_2step:
+  firm: The5ers
+  program: High Stakes (2-step)
+  fee_currency: USD
+  sizes:
+    - {size: 2500, fee: 19}
+    - {size: 5000, fee: null}
+    - {size: 10000, fee: null}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: null}
+    - {size: 100000, fee: 545}
+  phase_targets: [10, 5]
+  max_daily_loss_pct: 5
+  daily_loss_basis: max
+  max_total_dd_pct: 10
+  max_dd_mode: static
+  min_trading_days: 0
+  min_profitable_days: 3
+  profitable_day_pct: 0.5
+  news_blackout_min: 2
+  leverage: 100
+  ea_policy: allowed with source ownership
+  verify: [daily-loss basis, fees; only one 25K/50K/100K account at a time]
+  sources: [https://the5ers.com/challenge-programs-bootcamp-high-stakes-hyper-growth-explained/]
+  # Hyper Growth (1-step) caps total capital at $40K, so it's left out of the 50K-centred set.
+
+fxify_2phase:
+  firm: FXIFY
+  program: Two Phase (Standard)
+  fee_currency: USD
+  sizes:
+    - {size: 5000, fee: null}
+    - {size: 15000, fee: null}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: null}
+    - {size: 100000, fee: null}
+    - {size: 200000, fee: null}
+    - {size: 400000, fee: null}
+  phase_targets: [10, 5]
+  max_daily_loss_pct: 4
+  daily_loss_basis: balance
+  max_total_dd_pct: 10
+  max_dd_mode: trailing
+  trailing_locks_at_initial: true
+  min_trading_days: 0
+  leverage: 30
+  ea_policy: written approval from support REQUIRED before running any EA
+  verify: [daily-loss basis, min days, fees; Classic (static, 5%/10%) and Pro (static 8%, 4%/8%) variants exist]
+  sources: [https://fxify.com/programs/two-phase/, https://propfirmito.com/fxify/,
+            https://tradingfinder.com/props/fxify/rules/]
+
+fxify_1phase:
+  firm: FXIFY
+  program: One Phase
+  fee_currency: USD
+  sizes:
+    - {size: 5000, fee: 59}
+    - {size: 15000, fee: null}
+    - {size: 25000, fee: null}
+    - {size: 50000, fee: null}
+    - {size: 100000, fee: null}
+    - {size: 200000, fee: null}
+  phase_targets: [10]
+  max_daily_loss_pct: 3
+  daily_loss_basis: balance
+  max_total_dd_pct: 6
+  max_dd_mode: trailing
+  trailing_locks_at_initial: true
+  min_trading_days: 0
+  leverage: 30
+  ea_policy: written approval from support REQUIRED before running any EA
+  verify: [trailing vs static (sources disagree; trailing modelled), sizes, fees]
+  sources: [https://fxify.com/blog/1-step-vs-2-step-prop-firm-challenges/, https://propfirmito.com/fxify/]

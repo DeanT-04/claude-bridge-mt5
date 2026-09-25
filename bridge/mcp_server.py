@@ -76,7 +76,7 @@ def _job(expert, symbol, timeframe, date_from, date_to, params, model, optimisat
 def run_backtest(expert: str, symbol: str, timeframe: str, date_from: str, date_to: str,
                  params: dict | None = None, model: str = "ohlc_m1", spread: int | None = None) -> dict:
     """Single MT5 Strategy Tester run on the portable tester copy (deposit/currency/leverage
-    from settings.yaml). expert like 'QB\\QB_Donchian.ex5'. model: ohlc_m1 | real_ticks |
+    from settings.yaml). expert like 'QB\\QB_Rules.ex5'. model: ohlc_m1 | real_ticks |
     every_tick | open_prices. Returns report summary and trade count (trades stored in registry)."""
     res = tester.run(_job(expert, symbol, timeframe, date_from, date_to, params, model, spread=spread))
     if res.ok:
@@ -104,18 +104,16 @@ def run_optimization(expert: str, symbol: str, timeframe: str, date_from: str, d
 @mcp.tool()
 def run_gauntlet(family: str, symbol: str, timeframe: str, mt5: bool = False) -> dict:
     """Full validation gauntlet (walk-forward, plateau, DSR, Monte Carlo sizing, cost stress,
-    random-entry + buy-and-hold benchmarks, £100 feasibility, one-shot holdout, optional MT5
-    parity/stress). Can take several minutes."""
+    random-entry + buy-and-hold benchmarks, one-shot holdout, prop-challenge ranking of every
+    firm program, optional MT5 parity/stress). Can take several minutes."""
     from research import data, gauntlet
     bars = data.bars(symbol, timeframe)
-    spec = mt5_client.symbol_spec(symbol)
-    acct = mt5_client.account_info()["currency"]
-    rate = gauntlet.acct_to_target_rate(mt5_client.symbol_spec, acct, config.settings()["account"]["currency"])
+    spec = data.spec(symbol)
     confirm = None
     if mt5:
         from research import mt5_confirm
         confirm = mt5_confirm.make(family, symbol, timeframe, bars, spec)
-    res = gauntlet.run(family, symbol, timeframe, bars, spec, rate, mt5_confirm=confirm,
+    res = gauntlet.run(family, symbol, timeframe, bars, spec, mt5_confirm=confirm,
                        progress=lambda *_: None)
     return _brief(res)
 
@@ -128,52 +126,50 @@ def _brief(res: dict) -> dict:
 
 
 @mcp.tool()
-def universe(small_account_only: bool = False, limit: int = 100) -> dict:
+def universe(limit: int = 100) -> dict:
     """Researchable symbols from the last scan, cheapest first (cost_atr = spread / H1 ATR,
-    minlot_risk_pct = % of the £100 target lost by the minimum lot at a 1.5×ATR stop)."""
+    minlot_risk_pct = % of the research account lost by the minimum lot at a 1.5×ATR stop)."""
     from research import universe as uni
-    rows = uni.load(small_account_only=small_account_only)
+    rows = uni.load()
     return {"total": len(rows), "symbols": rows[:limit]}
 
 
 @mcp.tool()
 def scan_universe(include_equities: bool = False) -> dict:
-    """Rescan every broker symbol and refresh the researchable / small-account lists (slow)."""
+    """Rescan every broker symbol and refresh the researchable list (about a minute)."""
     from research import universe as uni
     rows = uni.scan(include_equities=include_equities, progress=lambda *_: None)
-    ok = [r for r in rows if r["researchable"]]
-    return {"scanned": len(rows), "researchable": len(ok), "small_account": sum(r["small_account"] for r in ok)}
+    return {"scanned": len(rows), "researchable": sum(r["researchable"] for r in rows)}
+
+
+def _symbols(symbols: list[str]) -> list[str]:
+    """Resolve the ['researchable'] and ['core'] shortcuts."""
+    from research import universe as uni
+    if symbols == ["researchable"]:
+        return [r["symbol"] for r in uni.load()]
+    if symbols == ["core"]:
+        return list(config.settings()["research"]["core_symbols"])
+    return symbols
 
 
 @mcp.tool()
 def enqueue_research(families: list[str], symbols: list[str], timeframes: list[str], redo: bool = False) -> dict:
-    """Queue gauntlet jobs. families: names or ['all']. symbols: names or ['small'|'researchable'|'core']."""
+    """Queue gauntlet jobs. families: names, ['all'] or ['evolve'] (genetic search).
+    symbols: names, ['researchable'] or ['core']."""
     from research import jobqueue
     from research.strategies import FAMILIES
-    from research import universe as uni
     fams = list(FAMILIES) if families == ["all"] else families
-    if symbols in (["small"], ["researchable"]):
-        syms = [r["symbol"] for r in uni.load(small_account_only=symbols == ["small"])]
-    elif symbols == ["core"]:
-        syms = list(config.settings()["research"]["core_symbols"])
-    else:
-        syms = symbols
-    return {"enqueued": jobqueue.enqueue(fams, syms, timeframes, redo=redo)}
+    return {"enqueued": jobqueue.enqueue(fams, _symbols(symbols), timeframes, redo=redo)}
 
 
 @mcp.tool()
 def enqueue_ml(symbols: list[str], timeframes: list[str], models: list[str] | None = None,
                label_k: float = 1.5, label_bars: int = 24) -> dict:
     """Register ML strategies (walk-forward logreg/gbm on 12 features, exported to ONNX) and queue
-    their gauntlets. symbols: names or ['small'|'researchable'|'core']."""
+    their gauntlets. symbols: names, ['researchable'] or ['core']."""
     from research import jobqueue, ml
-    from research import universe as uni
-    if symbols in (["small"], ["researchable"]):
-        symbols = [r["symbol"] for r in uni.load(small_account_only=symbols == ["small"])]
-    elif symbols == ["core"]:
-        symbols = list(config.settings()["research"]["core_symbols"])
     n, fams = 0, []
-    for s in symbols:
+    for s in _symbols(symbols):
         for tf in timeframes:
             for mdl in models or ["logreg", "gbm"]:
                 f = ml.register(s, tf, mdl, label_k, label_bars)
@@ -211,24 +207,24 @@ def research_survivors() -> list[dict]:
     return jobqueue.survivors()
 
 
-# ------------------------------------------------------------------ deployment (M3)
+# ------------------------------------------------------------------ deployment
 @mcp.tool()
 def install_host(target: str = "demo") -> dict:
-    """Sync the QB sources into the demo or live terminal and compile QB_Host there. Afterwards
-    the user attaches QB_Host to any chart once (InpConfig=portfolio_<target>.cfg) and enables
-    Algo Trading. ML sleeves also need their .onnx files, which live in the shared Common folder."""
+    """Sync the QB sources into a target terminal (demo or a prop account) and compile QB_Host
+    there. Afterwards the user attaches QB_Host to any chart once (InpConfig=portfolio_<target>.cfg)
+    and enables Algo Trading. ML sleeves also need their .onnx files (shared Common folder)."""
     from bridge import preflight
     return compiler.compile_expert("QB_Host", preflight.terminal_mql5(target))
 
 
 @mcp.tool()
-def live_preflight() -> dict:
-    """Read-only live-readiness report: live_enabled, separate live terminal reachable and on a
-    REAL account in the target currency/leverage, QB_Host compiled + running + not halted, risk
-    limits sane, every sleeve validated, and each sleeve's min lot fits its risk at the real
-    balance. Run before approving any live proposal."""
+def prop_preflight(target: str) -> dict:
+    """Read-only readiness report for a prop-account target: enabled by the user, program and
+    size set, EA approval where the firm requires it, terminal reachable on the expected account
+    type, balance = challenge size, QB_Host compiled/running/not halted, prop rules in the config,
+    sleeves validated, min lots fit. Run before approving any prop proposal."""
     from bridge import preflight
-    return preflight.live_preflight()
+    return preflight.preflight(target)
 
 
 @mcp.tool()
@@ -252,25 +248,21 @@ def portfolio_allocation(gauntlet_ids: list[int], budget_pct: float | None = Non
 def propose_deployment(add_gauntlet_ids: list[int] | None = None, remove_sleeve_ids: list[int] | None = None,
                        target: str = "demo", allow_unvalidated: bool = False, enabled: bool = True,
                        limits: dict | None = None, reset_halt: bool = False, note: str = "",
-                       balance_scale: float | None = None, prop_profile: str | None = None) -> dict:
+                       balance_scale: float | None = None, prop_profile: str | None = None,
+                       prop_size: float | None = None) -> dict:
     """Draft a new QB_Host config. Changes NOTHING on the terminal. Returns the full config, a
     diff against the running one, and proposal_id + sha256. Show the user the diff and wait for
     their explicit approval in chat before calling apply_deployment. allow_unvalidated lets a
     sleeve that failed the gauntlet forward-test on demo only (small fixed risk).
-    balance_scale: None on demo = size as the £100 target account; 1.0 = the demo's own equity.
-    target: demo, live, or a prop target from settings.terminals (must be in enabled_targets).
-    prop_profile: name from prop_profiles(); writes its rules (limits tightened by
-    prop_safety_buffer) into the config for QB_Host to enforce. "" clears them."""
+    target: 'demo' or a prop target from settings.terminals (must be in enabled_targets); a prop
+    target automatically gets its program's rules. prop_profile overrides (name from
+    prop_profiles(); "" clears). On demo it rehearses a challenge's rules. Rules are tightened
+    by prop_safety_buffer and enforced by QB_Host. prop_size: challenge account size (default:
+    terminals.<target>.size). balance_scale: equity multiplier (default 1)."""
     from bridge import deploy
-    from research import gauntlet
-    scale = balance_scale
-    if target == "demo" and scale is None:
-        acct = mt5_client.account_info()
-        rate = 1 / gauntlet.acct_to_target_rate(mt5_client.symbol_spec, acct["currency"],
-                                                config.settings()["account"]["currency"])
-        scale = deploy.demo_balance_scale(acct, rate)
     return deploy.propose(target, add_gauntlet_ids, remove_sleeve_ids, allow_unvalidated, enabled,
-                          limits, scale, reset_halt, note, prop_profile=prop_profile)
+                          limits, balance_scale, reset_halt, note, prop_profile=prop_profile,
+                          prop_size=prop_size)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
@@ -301,46 +293,60 @@ def deployment_status(target: str = "demo") -> dict:
 @mcp.tool()
 def forward_test_report(target: str = "demo") -> dict:
     """Per-sleeve forward-test results from the terminal's deal history: trades, R, profit,
-    drift test vs backtest, and whether each sleeve is ready for live."""
+    drift test vs backtest, and whether each sleeve is ready for a prop account."""
     from bridge import monitor
     return monitor.forward_report(target)
 
 
 @mcp.tool()
-def promote_to_live(sleeve_ids: list[int], force: bool = False) -> dict:
-    """Draft a LIVE config from demo sleeves that passed the gauntlet and their forward test.
-    Refused unless account.live_enabled is true. Like any proposal it changes nothing until
-    the user approves and apply_deployment is called."""
+def promote(sleeve_ids: list[int], target: str, force: bool = False) -> dict:
+    """Draft a prop-account config from demo sleeves that passed the gauntlet and their demo
+    forward test, with the target's prop rules. Like any proposal it changes nothing until the
+    user approves and apply_deployment is called."""
     from bridge import monitor
-    return monitor.promote_to_live(sleeve_ids, force)
+    return monitor.promote(sleeve_ids, target, force)
 
 
-# ------------------------------------------------------------------ prop firms (M7)
+# ------------------------------------------------------------------ prop firms
 @mcp.tool()
 def prop_profiles() -> dict:
-    """Prop-firm rule profiles from config/propfirms.yaml."""
+    """Every modelled prop program (config/propfirms.yaml): firm, rules, and all account sizes
+    offered (smallest to largest) with fees, so the user can pick program + size."""
     from dataclasses import asdict
     from research import propfirm
     return {k: asdict(v) for k, v in propfirm.profiles().items()}
 
 
-@mcp.tool()
-def prop_simulate(gauntlet_ids: list[int], profile: str, years: float = 3.0) -> dict:
-    """Monte Carlo a prop challenge for these strategies (their pre-holdout trade days, applied
-    trade by trade): pass probability vs risk per trade, and the risk that maximises P(pass).
-    Figures use tuned params, so treat them as optimistic."""
-    from research import propfirm
+def _sleeves_for(gauntlet_ids: list[int]) -> list[dict]:
     con = db.connect()
-    sleeves = []
+    out = []
     for gid in gauntlet_ids:
         g = db.gauntlet(con, gid)
         risk = (g["stages"].get("sizing_montecarlo", {}).get("risk") or 0) * 100 or 1.0
-        sleeves.append({**g, "risk_pct": risk})
-    days, active, _ = propfirm.sleeve_days(sleeves, years)
-    res = propfirm.best_risk(days, active, propfirm.profiles()[profile])
+        out.append({**g, "risk_pct": risk})
+    return out
+
+
+@mcp.tool()
+def prop_simulate(gauntlet_ids: list[int], profile: str, size: float | None = None, years: float = 3.0) -> dict:
+    """Monte Carlo one prop program for these strategies (pre-holdout trade days, applied trade
+    by trade, every phase): P(pass) vs risk per trade, the P(pass)-maximising risk, and the fee
+    and expected cost per pass for the chosen account size. Tuned params: treat as optimistic."""
+    from research import propfirm
+    days, active, _ = propfirm.sleeve_days(_sleeves_for(gauntlet_ids), years)
+    res = propfirm.best_risk(days, active, propfirm.profiles()[profile], size)
     res.update({"trade_days": len(days), "active_share": round(active, 3),
                 "note": "risk_pct = risk per trade of the largest sleeve; others scale by their weights"})
     return res
+
+
+@mcp.tool()
+def prop_rank(gauntlet_ids: list[int], years: float = 3.0) -> list[dict]:
+    """Rank EVERY modelled prop program for these strategies by P(pass) at its best risk, with
+    each program's sizes/fees and cost per pass (at the research size)."""
+    from research import propfirm
+    days, active, _ = propfirm.sleeve_days(_sleeves_for(gauntlet_ids), years)
+    return propfirm.rank_programs(days, active, runs=1000)
 
 
 @mcp.tool()

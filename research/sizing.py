@@ -1,4 +1,4 @@
-"""Position sizing from the measured R distribution, and small-account feasibility."""
+"""Position sizing from the measured R distribution, and minimum-lot checks."""
 from __future__ import annotations
 
 import numpy as np
@@ -31,23 +31,8 @@ def choose_risk(r: np.ndarray, cfg: dict, dd95_max: float) -> dict:
     return {"kelly": k, "risk": 0.0, "reason": "drawdown cap unreachable at minimum risk"}
 
 
-def min_lot_risk_pct(spec: dict, stop_dist: float, balance: float, acct_per_quote: float = 1.0) -> float:
+def min_lot_risk_pct(spec: dict, stop_dist: float, balance: float) -> float:
     """Risk % of `balance` implied by trading the minimum lot with a given stop distance.
-
-    spec: from mt5_client.symbol_spec (tick_size, tick_value in the *terminal account* currency).
-    acct_per_quote: converts the terminal account currency to the target account currency
-    (e.g. USD->GBP when the demo is USD but the target live account is GBP).
-    """
-    loss = stop_dist / spec["tick_size"] * spec["tick_value"] * spec["volume_min"] * acct_per_quote
+    spec: from mt5_client.symbol_spec (tick_size, tick_value in the account currency)."""
+    loss = stop_dist / spec["tick_size"] * spec["tick_value"] * spec["volume_min"]
     return 100.0 * loss / balance
-
-
-def feasibility(spec: dict, stop_dists: np.ndarray, risk: float, balance: float,
-                acct_per_quote: float = 1.0) -> dict:
-    """Share of trades whose min-lot risk exceeds the chosen risk (those would be skipped)."""
-    if len(stop_dists) == 0:
-        return {"feasible": False, "skipped_share": 1.0}
-    pct = np.array([min_lot_risk_pct(spec, s, balance, acct_per_quote) for s in stop_dists])
-    skipped = float(np.mean(pct > risk * 100 + 1e-9))
-    return {"feasible": skipped <= 0.1, "skipped_share": skipped,
-            "min_lot_risk_pct_median": float(np.median(pct))}
