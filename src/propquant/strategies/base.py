@@ -22,6 +22,7 @@ class Strategy(ABC):
     param_space: ClassVar[dict[str, list]] = {}
     defaults: ClassVar[dict] = {}
     max_trades_per_session: ClassVar[int] = 1_000_000
+    timeframe: ClassVar[str] = "1m"  # bars the strategy runs on (1m / 5m / 15m)
     needs_idea_note: ClassVar[bool] = True  # pre-registration is enforced by the gauntlet
 
     def __init__(self, **params) -> None:
@@ -32,7 +33,8 @@ class Strategy(ABC):
 
     def __init_subclass__(cls, **kw) -> None:
         super().__init_subclass__(**kw)
-        if not getattr(cls, "__abstractmethods__", None):
+        # register concrete strategies only: templates/bases without their own name are skipped
+        if "name" in cls.__dict__ and not getattr(cls, "__abstractmethods__", None):
             REGISTRY[cls.name] = cls
 
     @abstractmethod

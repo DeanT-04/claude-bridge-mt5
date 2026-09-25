@@ -57,6 +57,9 @@ def random_entry(r: GauntletResult, path) -> None:
 def fan(r: GauntletResult, path, n_paths: int = 120) -> None:
     cfg = config.load()
     spec = challenge(cfg["firm"]["name"], r.best_plan, cfg["firm"]["size"])
+    if r.family == "portfolio":  # one unit = 1 micro of every member
+        units = max(1, len(r.final_params))
+        spec = spec.model_copy(update={"eval_max_micros": spec.eval_max_micros // units})
     out, pnl = r.mc_paths["out"], r.mc_paths["pnl"]
     sizes = np.concatenate([np.full(f.test_sessions[1] - f.test_sessions[0], f.sizes[r.best_plan])
                             for f in r.folds])  # fmt: skip
@@ -125,6 +128,8 @@ def monthly(r: GauntletResult, path) -> None:
 
 
 def sensitivity(r: GauntletResult, path) -> None:
+    if not r.grid:  # portfolios have no parameter grid of their own
+        return
     sr = np.array(r.grid_dev_sharpe) * np.sqrt(252)
     order = np.argsort(sr)
     chosen = r.grid.index(r.final_params)
@@ -223,7 +228,7 @@ Failed gates:
 ![[{slug}-random.png]]
 ![[{slug}-drawdown.png]]
 ![[{slug}-monthly.png]]
-![[{slug}-sensitivity.png]]
+{"" if not r.grid else f"![[{slug}-sensitivity.png]]"}
 
 Reproduce: `uv run propquant gauntlet run {r.strategy}`. Firm-rule assumptions: see
 [[Apex Trader Funding]] (open questions).

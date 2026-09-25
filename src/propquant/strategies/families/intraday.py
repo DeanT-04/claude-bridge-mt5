@@ -15,7 +15,7 @@ EXIT_MINUTE = 955  # leave by 15:55 (exit signal on the 15:54 bar -> fills at 15
 
 
 def _time_exit(o: Orders, md: MarketData, minute: int) -> None:
-    o.exit_sig |= md.minute == minute - 1
+    o.exit_sig |= F.last_bar_before(md, minute)
 
 
 class OpeningRangeBreakout(Strategy):

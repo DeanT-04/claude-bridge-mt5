@@ -94,6 +94,8 @@ get("control_random")  # populate the registry (imports every family)
 @pytest.mark.parametrize("name", sorted(REGISTRY))
 @pytest.mark.parametrize("seed", [3, 17])
 def test_strategy_orders_are_causal(name: str, seed: int) -> None:
+    if getattr(REGISTRY[name], "filter_name", None):
+        pytest.skip("filtered variant: base tested here, filter masks in test_filters.py")
     md = synthetic_md(seed, sessions=25)
     strat = REGISTRY[name]()
     a = strat.orders(md)

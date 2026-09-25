@@ -1,0 +1,65 @@
+# FTMO: 2-Step (Challenge + Verification) and 1-Step Challenge rules.
+#
+# PARTIAL (work in progress): only the trading objectives page has been read so far.
+# Every rule below cites a source key. Anything not yet verified is in `open_questions`.
+firm: ftmo
+name: FTMO
+verified_on: 2026-09-25
+platform: mt5   # CFD firm; platform choice not yet verified for this file
+
+sources:
+  objectives: {url: "https://ftmo.com/en/trading-objectives/", fetched: "2026-09-25 (live page, via WebFetch summary)"}
+
+session:
+  day_reset: "00:00"            # objectives: "00:00 CE(S)T"
+  day_reset_tz: "Europe/Prague" # CE(S)T, i.e. CET/CEST with DST
+  trading_day_definition: "any day 00:00:00-23:59:59 CE(S)T in which at least one position is opened"  # objectives
+
+programmes:
+  two_step:   # source: objectives
+    phases:
+      challenge:
+        profit_target_pct: 10
+        max_daily_loss_pct: 5        # of INITIAL capital
+        daily_loss_basis: "balance at 00:00 CE(S)T minus 5% of initial capital"
+        max_loss_pct: 10
+        max_loss_type: static        # floor = initial capital - 10% of initial
+        min_trading_days: 4
+        best_day_max_share: 0.5      # not a breach; must keep trading until satisfied
+      verification:
+        profit_target_pct: 5
+        max_daily_loss_pct: 5
+        daily_loss_basis: "balance at 00:00 CE(S)T minus 5% of initial capital"
+        max_loss_pct: 10
+        max_loss_type: static
+        min_trading_days: 4
+        best_day_max_share: 0.5
+    funded:
+      profit_target_pct: null        # "No profit target" on FTMO Account
+      max_daily_loss_pct: 5
+      max_loss_pct: 10
+      max_loss_type: static
+      min_trading_days: 0
+  one_step:   # source: objectives
+    phases:
+      challenge:
+        profit_target_pct: 10
+        max_daily_loss_pct: 3
+        daily_loss_basis: "balance at 00:00 CE(S)T minus 3% of initial capital"
+        max_loss_pct: 10
+        max_loss_type: eod_trailing  # highest preceding EOD balance - 10% of initial; only ratchets up
+        min_trading_days: 0
+        best_day_max_share: 0.5
+    funded:
+      profit_target_pct: null
+      max_daily_loss_pct: 3
+      max_loss_pct: 10
+      max_loss_type: eod_trailing
+      min_trading_days: 0
+
+open_questions:
+  - "Fees per account size, refund policy, account sizes: not yet verified."
+  - "Whether the daily-loss check includes floating P&L, commissions and swaps: not yet quoted verbatim."
+  - "Time limit per phase, news/weekend restrictions, profit split, payout timing, scaling plan: not yet verified."
+  - "US100/US500 contract specs, leverage, commission, spreads: not yet verified."
+  - "Whether the 1-Step max-loss trail stops at some level (e.g. initial balance): not yet verified."

@@ -96,3 +96,12 @@ def test_holdout_is_opened_once_per_config(reg) -> None:
     assert a.holdout is not None and b.holdout is None
     assert "already used" in b.holdout_note
     assert not dict((c.name, c.passed) for c in b.checks)["Holdout consistent"]
+
+
+def test_run_identity_is_the_strategy_name(reg) -> None:
+    res = grun.run("test_planted_hour", md_full=synthetic(4.0, 4), registry=reg,
+                   progress=lambda *_: None)  # fmt: skip
+    assert res.strategy == "test_planted_hour"
+    who = {r[0] for r in reg.con.execute("SELECT strategy FROM holdout_access").fetchall()}
+    runs = {r[0] for r in reg.con.execute("SELECT strategy FROM runs").fetchall()}
+    assert who == runs == {"test_planted_hour"}

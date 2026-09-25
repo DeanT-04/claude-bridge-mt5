@@ -49,6 +49,7 @@ class GauntletResult:
     seed: int
     grid: list[dict]
     grid_dev_sharpe: list[float]
+    grid_metrics: list[dict]
     folds: list[Fold]
     oos_days: np.ndarray  # session day numbers
     oos_daily: np.ndarray  # USD per micro per session
@@ -155,14 +156,15 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
     cls = get(name)
     idea_hash = ""
     if cls.needs_idea_note:
-        idea_hash = ideas.require(name)  # no pre-registered hypothesis -> no test
+        idea_hash = ideas.require(name, symbol)  # no pre-registered hypothesis -> no test
+    skey = name if symbol == "NQ" else f"{name}@{symbol}"  # registry / vault identity
     own_registry = registry is None
     reg = registry or Registry()
     run_id = uuid.uuid4().hex[:10]
     seed = cfg["random_entry"]["seed"]
     try:
         if md_full is None:
-            md_full = MarketData.load(symbol)
+            md_full = MarketData.load(symbol, cls.timeframe)
         first = _sessions_from(md_full, cfg["research_start"])
         end = _sessions_from(md_full, cfg["holdout_end"] + timedelta(days=1))
         md_full = md_full.slice_sessions(first, end)
@@ -180,16 +182,22 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         # ---- 1. sweep the pre-registered grid on dev data (every point is a counted trial)
         grid = param_grid(cls)
         progress(f"{name}: sweeping {len(grid)} configs on {len(md_dev.sess_day)} dev sessions")
-        daily, n_trades_by_sess, dev_sharpe = [], [], []
+        daily, n_trades_by_sess, dev_sharpe, grid_metrics = [], [], [], []
         for p in grid:
             r = cls(**p).backtest(md_dev, costs)
             d = r.daily_pnl()
             daily.append(d)
+            wins = r.trades[:, 5] > 0 if len(r.trades) else np.zeros(0, bool)
+            grid_metrics.append({
+                "params": p, "dev_sharpe_ann": stats.annualised_sharpe(d),
+                "trades": len(r.trades), "net_pnl": float(r.trades[:, 5].sum()),
+                "win_rate": float(wins.mean()) if len(wins) else 0.0,
+            })  # fmt: skip
             cnt = np.zeros(len(md_dev.sess_day))
             np.add.at(cnt, md_dev.sess[r.trades[:, 0].astype(np.int64)], 1)
             n_trades_by_sess.append(cnt)
             dev_sharpe.append(stats.sharpe(d))
-        reg.add_trials(run_id, name, cls.family,
+        reg.add_trials(run_id, skey, cls.family,
                        [(p, "dev", s) for p, s in zip(grid, dev_sharpe, strict=True)],
                        md_dev.data_hash)  # fmt: skip
 
@@ -244,6 +252,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         re_pct = random_entry.percentile(oos_total, re_runs)
         n_trials = reg.n_trials()
         scores = reg.con.execute("SELECT score FROM trials WHERE scope='dev'").fetchnumpy()
+        reg.release()
         sr_var = float(np.var(scores["score"])) if len(scores["score"]) > 1 else 0.0
         dsr = stats.dsr(oos_daily, n_trials, sr_var)
         psr = stats.psr(oos_daily)
@@ -263,11 +272,11 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         final_sizes = {p: v[0] for p, v in final_sizing.items()}
         final_policies = {p: v[1] for p, v in final_sizing.items()}
         holdout, h_days, h_daily, note = None, None, None, ""
-        uses = reg.holdout_uses(name, final)
+        uses = reg.holdout_uses(skey, final)
         if uses and not force_holdout:
             note = f"holdout already used {uses}x for these params: not re-run"
         else:
-            reg.log_holdout(run_id, name, final, forced=bool(uses))
+            reg.log_holdout(run_id, skey, final, forced=bool(uses))
             full = cls(**final).backtest(md_full, costs)
             h_pnl = ch.slice_pnl(full.sim_input(), dev_end, len(md_full.sess_day))
             h_daily = np.add.reduceat(h_pnl["d_close"], h_pnl["sess_start"][:-1])
@@ -290,8 +299,9 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
                             ch=oos_ch[best_plan], holdout_ok=holdout_ok)  # fmt: skip
         v, failed = verdict.decide(cs, cfg["contender"], oos_ch[best_plan], cfg.get("champion"))
         res = GauntletResult(
-            strategy=name, family=cls.family, run_id=run_id, data_hash=md_dev.data_hash,
-            commit=reg.commit, seed=seed, grid=grid, grid_dev_sharpe=dev_sharpe, folds=folds,
+            strategy=skey, family=cls.family, run_id=run_id, data_hash=md_dev.data_hash,
+            commit=reg.commit, seed=seed, grid=grid, grid_dev_sharpe=dev_sharpe,
+            grid_metrics=grid_metrics, folds=folds,
             oos_days=oos_pnl["sess_day"], oos_daily=oos_daily, oos_trades=oos_trades,
             oos_challenge=oos_ch, best_plan=best_plan, re_runs=re_runs, re_percentile=re_pct,
             oos_total=oos_total, psr=psr, dsr=dsr, n_trials=n_trials, sr_variance=sr_var,
@@ -300,7 +310,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             holdout_daily=h_daily, holdout_note=note, checks=cs, verdict=v, failed=failed,
             mc_paths={"out": mc_out[best_plan], "pnl": oos_pnl},
         )  # fmt: skip
-        reg.log_run(run_id, name, v, res.summary() | {"idea_hash": idea_hash}, md_dev.data_hash,
+        reg.log_run(run_id, skey, v, res.summary() | {"idea_hash": idea_hash}, md_dev.data_hash,
                     seed)  # fmt: skip
         return res
     finally:

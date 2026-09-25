@@ -7,6 +7,7 @@ being recorded. Holdout access is logged in the same database. The file lives in
 
 import json
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -48,14 +49,36 @@ def git_commit() -> str:
 
 
 class Registry:
+    """Connects on demand and releases the file after each write/read helper, so a long
+    gauntlet run never holds the DuckDB lock while it backtests (other processes can read)."""
+
     def __init__(self, path: Path = DB_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.con = duckdb.connect(str(path))
-        self.con.execute(SCHEMA)
+        self.path = path
+        self._con: duckdb.DuckDBPyConnection | None = None
         self.commit = git_commit()
+        self.con.execute(SCHEMA)
+        self.release()
 
-    def close(self) -> None:
-        self.con.close()
+    @property
+    def con(self) -> duckdb.DuckDBPyConnection:
+        if self._con is None:
+            for attempt in range(120):  # wait up to ~2 min for another process's write
+                try:
+                    self._con = duckdb.connect(str(self.path))
+                    break
+                except duckdb.IOException:
+                    if attempt == 119:
+                        raise
+                    time.sleep(1)
+        return self._con  # type: ignore[return-value]
+
+    def release(self) -> None:
+        if self._con is not None:
+            self._con.close()
+            self._con = None
+
+    close = release
 
     def add_trials(
         self, run_id: str, strategy: str, family: str, rows: list[tuple[dict, str, float]],
@@ -70,6 +93,7 @@ class Registry:
                 for p, scope, score in rows
             ],
         )  # fmt: skip
+        self.release()
 
     def n_trials(self, family: str | None = None) -> int:
         """Distinct configurations ever evaluated (optionally within one family)."""
@@ -78,11 +102,14 @@ class Registry:
         if family:
             q += " WHERE family = ?"
             args.append(family)
-        return int(self.con.execute(q, args).fetchone()[0])  # type: ignore[index]
+        n = int(self.con.execute(q, args).fetchone()[0])  # type: ignore[index]
+        self.release()
+        return n
 
     def holdout_uses(self, strategy: str, params: dict) -> int:
         q = "SELECT count(*) FROM holdout_access WHERE strategy = ? AND params = ?"
         row = self.con.execute(q, [strategy, json.dumps(params, sort_keys=True)]).fetchone()
+        self.release()
         return int(row[0])  # type: ignore[index]
 
     def log_holdout(self, run_id: str, strategy: str, params: dict, forced: bool) -> None:
@@ -91,6 +118,7 @@ class Registry:
             [datetime.now(UTC), run_id, strategy, json.dumps(params, sort_keys=True),
              self.commit, forced],
         )  # fmt: skip
+        self.release()
 
     def log_run(self, run_id: str, strategy: str, verdict: str, summary: dict, data_hash: str,
                 seed: int) -> None:  # fmt: skip
@@ -99,3 +127,4 @@ class Registry:
             [datetime.now(UTC), run_id, strategy, verdict, json.dumps(summary, default=float),
              self.commit, data_hash, seed],
         )  # fmt: skip
+        self.release()

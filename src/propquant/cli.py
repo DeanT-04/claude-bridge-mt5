@@ -102,6 +102,16 @@ def data_collect(symbol: str = typer.Option(..., help="Instrument symbol, e.g. N
         console.print(f"{symbol} {interval}: +{new:,} bars (total {total:,})")
 
 
+@data_app.command("collect-daily")
+def data_collect_daily() -> None:
+    """Fetch daily regime series (VIX) from Yahoo."""
+    from propquant.data import yfin
+
+    for sym, ticker in yfin.DAILY.items():
+        new, total = yfin.collect(sym, ticker, "1d")
+        console.print(f"{sym} 1d: +{new:,} (total {total:,})")
+
+
 @data_app.command("tracking")
 def data_tracking(symbol: str = typer.Option(..., help="Instrument symbol, e.g. NQ")) -> None:
     """Measure proxy-vs-futures fidelity; writes charts + a vault report."""
@@ -149,9 +159,96 @@ def gauntlet_run(
         console.print(f"  {r['result']:>4}  {r['gate']:<34} {r['value']:>10.3f}  {r['needs']}")
     console.print(f"[bold]{strategy}: {res.verdict.upper()}[/bold]  (run {res.run_id})")
     console.print(report.write(res))
+    from propquant.reports import export
     from propquant.vault import leaderboard
 
+    console.print(export.write(res))
+
     leaderboard.update()
+
+
+@gauntlet_app.command("batch")
+def gauntlet_batch(
+    symbol: str = typer.Option("NQ"),
+    only_new: bool = typer.Option(True, help="Skip strategies already run on this symbol"),
+    match: str = typer.Option("", help="Only strategies whose name contains this"),
+    shard: str = typer.Option("0/1", help="i/n: this worker takes every n-th strategy from i"),
+) -> None:
+    """Run every pre-registered strategy through the gauntlet (one after another).
+
+    Parallel workers: start n processes with --shard 0/n ... (n-1)/n and cap numba threads
+    per process (NUMBA_NUM_THREADS) so the machine is not oversubscribed."""
+    import traceback
+
+    from propquant.gauntlet import run as grun
+    from propquant.reports import export
+    from propquant.reports import strategy as report
+    from propquant.strategies.base import REGISTRY, get
+    from propquant.trials import Registry
+    from propquant.vault import ideas, leaderboard
+
+    get("orb")  # registers every family
+    reg = Registry()
+    done = {r[0] for r in reg.con.execute("SELECT DISTINCT strategy FROM runs").fetchall()}
+    reg.close()
+    names = [n for n, c in sorted(REGISTRY.items()) if c.needs_idea_note and match in n]
+    i, n_shards = (int(x) for x in shard.split("/"))
+    names = names[i::n_shards]
+    for n in names:
+        key = n if symbol == "NQ" else f"{n}@{symbol}"
+        if only_new and key in done:
+            continue
+        try:
+            ideas.require(n, symbol)
+        except ideas.MissingIdea as e:
+            console.print(f"[yellow]skip {key}: {e}[/yellow]")
+            continue
+        try:
+            res = grun.run(n, symbol, progress=lambda *_: None)
+            report.write(res)
+            export.write(res)
+            leaderboard.update()
+            s = res.summary()
+            console.print(
+                f"{key:<40} {res.verdict:<10} e2e={s['e2e']:.2f} pass={s['eval_pass']:.2f} "
+                f"dsr={s['dsr']:.2f} re={s['re_pct']:.2f}"
+            )
+        except Exception:
+            console.print(f"[red]{key} FAILED[/red]\n{traceback.format_exc()}")
+
+
+@gauntlet_app.command("portfolio")
+def gauntlet_portfolio(
+    label: str = typer.Argument(..., help="Pre-registered portfolio idea name"),
+    members: str = typer.Option(..., help="Comma list, e.g. late_trend,orb@ES"),
+) -> None:
+    """Run several strategies together as one Apex account (P7)."""
+    from propquant.gauntlet import portfolio
+    from propquant.reports import export
+    from propquant.reports import strategy as report
+    from propquant.vault import leaderboard
+
+    ms = [portfolio.Member(*[*m.split("@"), "NQ"][:2]) for m in members.split(",")]
+    res = portfolio.run(label, ms, log=console.print)
+    for ck in res.checks:
+        r = ck.row()
+        console.print(f"  {r['result']:>4}  {r['gate']:<34} {r['value']:>10.3f}  {r['needs']}")
+    console.print(f"[bold]{label}: {res.verdict.upper()}[/bold]  ({res.holdout_note})")
+    console.print(report.write(res))
+    console.print(export.write(res))
+    leaderboard.update()
+
+
+dash_app = typer.Typer(no_args_is_help=True, help="HTML dashboard of every result.")
+app.add_typer(dash_app, name="dashboard")
+
+
+@dash_app.command("build")
+def dashboard_build() -> None:
+    """Write dashboard/data.js from the registry; open dashboard/index.html."""
+    from propquant import dashboard
+
+    console.print(dashboard.build())
 
 
 @vault_app.command("leaderboard")

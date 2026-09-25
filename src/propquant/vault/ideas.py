@@ -19,8 +19,15 @@ def path(name: str):
     return paths.vault_dir() / "Ideas" / f"{name}.md"
 
 
-def require(name: str) -> str:
+def require(name: str, symbol: str = "NQ") -> str:
+    """Hash of the pre-registration covering (strategy, symbol). An instrument extension lives
+    in `Ideas/<name>@<SYMBOL>.md`; otherwise the base note must list the symbol."""
+    ext = path(f"{name}@{symbol}")
+    if ext.exists():
+        return hashlib.sha256(ext.read_bytes()).hexdigest()[:16]
     p = path(name)
+    if p.exists() and symbol not in p.read_text(encoding="utf-8").split("instruments:")[1][:80]:
+        raise MissingIdea(f"{name}: pre-registration does not cover {symbol}")
     if not p.exists():
         raise MissingIdea(
             f"{name}: no pre-registered hypothesis at {p}. Write the Idea note first "

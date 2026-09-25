@@ -55,18 +55,46 @@ def rolling_mean_prev(x: np.ndarray, n: int) -> np.ndarray:
     return out
 
 
+def last_bar_before(md: MarketData, minute: int) -> np.ndarray:
+    """True on each session's last bar that opens before clock `minute` (RTH-side minutes),
+    so an exit signal there fills at the first bar opening at/after `minute`."""
+    ok = (md.minute < minute) & (md.minute >= 0) & (md.minute < 1080)
+    nxt = np.r_[md.minute[1:], -1]
+    same = np.r_[md.sess[1:] == md.sess[:-1], False]
+    return ok & (~same | (nxt >= minute) | (nxt >= 1080))
+
+
 def to_bars(md: MarketData, per_session: np.ndarray) -> np.ndarray:
     """Broadcast a per-session array to every bar of that session."""
     return per_session[md.sess]
 
 
+def last_in_window(md: MarketData, values: np.ndarray, m0: int, m1: int) -> np.ndarray:
+    """Per-session value on the LAST bar with m0 <= minute < m1 (handles half-day closes).
+    Known at the close of that bar."""
+    out = np.full(n_sessions(md), np.nan)
+    idx = np.flatnonzero((md.minute >= m0) & (md.minute < m1))
+    out[md.sess[idx]] = values[idx]  # later bars overwrite earlier ones
+    return out
+
+
+def ffill(x: np.ndarray) -> np.ndarray:
+    """Carry the last known value forward (never backward: leading NaNs stay NaN)."""
+    out = x.astype(np.float64).copy()
+    for i in range(1, len(out)):
+        if np.isnan(out[i]):
+            out[i] = out[i - 1]
+    return out
+
+
 def rth_daily(md: MarketData) -> dict[str, np.ndarray]:
     """Regular-session open/close/high/low per session.
-    open: known at 09:30 bar open; close/high/low: known at the 15:59 bar close."""
+    open: known at the 09:30 bar open; close/high/low: known at the session's last RTH bar
+    (15:59, or 12:59 on half days)."""
     hi, lo = window_high_low(md, RTH_OPEN, RTH_LAST + 1)
     return {
         "open": at_minute(md, md.open, RTH_OPEN),
-        "close": at_minute(md, md.close, RTH_LAST),
+        "close": last_in_window(md, md.close, RTH_OPEN, RTH_LAST + 1),
         "high": hi,
         "low": lo,
     }

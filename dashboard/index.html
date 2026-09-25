@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prop Quant Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>Prop Quant Lab</h1>
+      <p class="muted" id="generated"></p>
+    </div>
+    <button class="theme" id="theme" type="button" aria-label="Toggle light/dark theme">◐</button>
+  </header>
+
+  <main>
+    <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+    <section class="panel" aria-label="Catalogue progress">
+      <div class="progress-head">
+        <h2>Catalogue progress</h2>
+        <span class="muted" id="progress-label"></span>
+      </div>
+      <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="controls">
+        <input id="search" type="search" placeholder="Search strategies…" aria-label="Search">
+        <div class="chips" id="tier-chips" role="group" aria-label="Tier filter"></div>
+        <select id="family" aria-label="Family"><option value="">All families</option></select>
+        <select id="symbol" aria-label="Instrument"><option value="">All instruments</option></select>
+      </div>
+      <div class="table-wrap">
+        <table id="table">
+          <thead><tr>
+            <th data-k="rank">#</th><th data-k="key">Strategy</th><th data-k="family">Family</th>
+            <th data-k="verdict">Tier</th><th data-k="plan">Plan</th>
+            <th data-k="e2e" class="num">Reach payout</th><th data-k="eval_pass" class="num">Eval pass</th>
+            <th data-k="ev" class="num">EV / attempt</th><th data-k="dsr" class="num">DSR</th>
+            <th data-k="re_pct" class="num">Beats random</th><th data-k="oos_trades" class="num">OOS trades</th>
+            <th data-k="runs" class="num">Runs</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small" id="count"></p>
+    </section>
+
+    <section class="panel hidden" id="detail" aria-live="polite"></section>
+
+    <section class="panel">
+      <h2>Catalogue</h2>
+      <p class="muted small">Every planned (strategy, instrument) test. Progress is measured against this list.</p>
+      <div class="cat" id="catalogue"></div>
+    </section>
+  </main>
+
+  <div class="tooltip" id="tooltip" role="tooltip"></div>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
