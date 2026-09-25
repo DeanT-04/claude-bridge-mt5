@@ -1,0 +1,421 @@
+//+------------------------------------------------------------------+
+//| QB_Host: portfolio host. Attach once to any chart; it trades     |
+//| every sleeve listed in Common\Files\QB\<InpConfig> and reloads    |
+//| the file whenever it changes.                                     |
+//|                                                                   |
+//| Each sleeve = one signal family on one symbol/timeframe, with     |
+//| execution identical to QB_Rules (and research/engine.py).         |
+//|                                                                   |
+//| Safety enforced here, independent of Claude or the bridge:        |
+//|  - config account=demo|live must match the account's trade mode  |
+//|  - enabled=0 closes every QB position and stops trading           |
+//|  - daily loss limit: close all, pause until the next server day   |
+//|  - total drawdown from peak: close all, halt until reset_halt     |
+//|  - max open risk (sum of sleeve risk % with an open position)     |
+//|  - per-sleeve max spread filter                                   |
+//+------------------------------------------------------------------+
+#property strict
+#property version "1.00"
+
+#include <Trade\Trade.mqh>
+#include <QB\Risk.mqh>
+#include <QB\Signals.mqh>
+
+input string InpConfig    = "portfolio_demo.cfg";  // file in Common\Files\QB
+input long   InpMagicBase = 900000;                 // sleeve magic = base + sleeve id
+input int    InpTimerSec  = 1;
+
+#define QB_MAGIC_SPAN 100000
+
+//+------------------------------------------------------------------+
+class CSleeve
+{
+public:
+   int             id;
+   string          sym;
+   ENUM_TIMEFRAMES tf;
+   ENUM_QB_FAMILY  fam;
+   double          risk;          // % of (scaled) equity per trade
+   int             atr_period;
+   double          sl_atr, tp_atr;
+   int             max_bars, s_start, s_end;
+   double          max_spread;    // points; 0 = no filter
+   QBSignalParams  sp;
+   CQBSignal      *sig;
+   int             atr;
+   datetime        last_bar;
+   long            magic;
+   string          error;
+
+   CSleeve() : sig(NULL), atr(INVALID_HANDLE), last_bar(0), risk(0), max_spread(0),
+               atr_period(14), sl_atr(2), tp_atr(3), max_bars(24), s_start(0), s_end(24), error("")
+   {
+      sp.channel = 20; sp.fast = 20; sp.slow = 100; sp.rsi_period = 14; sp.rsi_lo = 30; sp.rsi_hi = 70;
+      sp.bb_period = 20; sp.bb_dev = 2.0; sp.or_start = 8; sp.or_hours = 2; sp.kc_period = 20;
+      sp.kc_mult = 1.5; sp.entry_hour = 10; sp.lookback = 4;
+   }
+   ~CSleeve() { Release(); }
+
+   void Release()
+   {
+      if(sig != NULL) { delete sig; sig = NULL; }
+      if(atr != INVALID_HANDLE) { IndicatorRelease(atr); atr = INVALID_HANDLE; }
+   }
+
+   bool Init()
+   {
+      if(!SymbolSelect(sym, true)) { error = "unknown symbol"; return false; }
+      sig = QB_CreateSignal(fam);
+      if(sig == NULL || !sig.Init(sym, tf, sp)) { error = "signal init failed"; return false; }
+      atr = iATR(sym, tf, atr_period);
+      if(atr == INVALID_HANDLE) { error = "atr init failed"; return false; }
+      last_bar = iTime(sym, tf, 0);   // never act on a bar that opened before we loaded
+      return true;
+   }
+};
+
+CTrade    g_trade;
+CSleeve  *g_sleeves[];
+string    g_path;
+datetime  g_cfg_mtime = 0;
+string    g_gv;                        // global-variable prefix
+// config
+int       g_version = 0;
+bool      g_enabled = false;
+string    g_account = "";
+double    g_scale = 1.0, g_max_daily = 0, g_max_dd = 0, g_max_open = 0;
+int       g_reset_halt = 0;
+// state
+string    g_error = "";
+datetime  g_last_status = 0;
+
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES TfFromString(const string s)
+{
+   if(s == "M1")  return PERIOD_M1;  if(s == "M5")  return PERIOD_M5;
+   if(s == "M15") return PERIOD_M15; if(s == "M30") return PERIOD_M30;
+   if(s == "H1")  return PERIOD_H1;  if(s == "H4")  return PERIOD_H4;
+   if(s == "D1")  return PERIOD_D1;
+   return PERIOD_CURRENT;
+}
+
+string TfToString(const ENUM_TIMEFRAMES tf)
+{
+   switch(tf)
+   {
+      case PERIOD_M1: return "M1"; case PERIOD_M5: return "M5"; case PERIOD_M15: return "M15";
+      case PERIOD_M30: return "M30"; case PERIOD_H1: return "H1"; case PERIOD_H4: return "H4";
+      case PERIOD_D1: return "D1";
+   }
+   return "?";
+}
+
+void SetSleeveField(CSleeve &s, const string k, const string v)
+{
+   if(k == "id") s.id = (int)StringToInteger(v);
+   else if(k == "family" || k == "InpFamily") s.fam = (ENUM_QB_FAMILY)StringToInteger(v);
+   else if(k == "symbol") s.sym = v;
+   else if(k == "tf") s.tf = TfFromString(v);
+   else if(k == "risk") s.risk = StringToDouble(v);
+   else if(k == "max_spread") s.max_spread = StringToDouble(v);
+   else if(k == "InpAtrPeriod") s.atr_period = (int)StringToInteger(v);
+   else if(k == "InpSlAtr") s.sl_atr = StringToDouble(v);
+   else if(k == "InpTpAtr") s.tp_atr = StringToDouble(v);
+   else if(k == "InpMaxBars") s.max_bars = (int)StringToInteger(v);
+   else if(k == "InpSessionStart") s.s_start = (int)StringToInteger(v);
+   else if(k == "InpSessionEnd") s.s_end = (int)StringToInteger(v);
+   else if(k == "InpChannel") s.sp.channel = (int)StringToInteger(v);
+   else if(k == "InpFast") s.sp.fast = (int)StringToInteger(v);
+   else if(k == "InpSlow") s.sp.slow = (int)StringToInteger(v);
+   else if(k == "InpRsiPeriod") s.sp.rsi_period = (int)StringToInteger(v);
+   else if(k == "InpRsiLo") s.sp.rsi_lo = StringToDouble(v);
+   else if(k == "InpRsiHi") s.sp.rsi_hi = StringToDouble(v);
+   else if(k == "InpBbPeriod") s.sp.bb_period = (int)StringToInteger(v);
+   else if(k == "InpBbDev") s.sp.bb_dev = StringToDouble(v);
+   else if(k == "InpOrStart") s.sp.or_start = (int)StringToInteger(v);
+   else if(k == "InpOrHours") s.sp.or_hours = (int)StringToInteger(v);
+   else if(k == "InpKcPeriod") s.sp.kc_period = (int)StringToInteger(v);
+   else if(k == "InpKcMult") s.sp.kc_mult = StringToDouble(v);
+   else if(k == "InpEntryHour") s.sp.entry_hour = (int)StringToInteger(v);
+   else if(k == "InpLookback") s.sp.lookback = (int)StringToInteger(v);
+}
+
+void ClearSleeves()
+{
+   for(int i = 0; i < ArraySize(g_sleeves); i++) if(g_sleeves[i] != NULL) delete g_sleeves[i];
+   ArrayResize(g_sleeves, 0);
+}
+
+bool LoadConfig()
+{
+   int h = FileOpen(g_path, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(h == INVALID_HANDLE) { g_error = "config not found: " + g_path; g_enabled = false; return false; }
+   ClearSleeves();
+   g_version = 0; g_enabled = false; g_account = ""; g_scale = 1.0;
+   g_max_daily = 0; g_max_dd = 0; g_max_open = 0; g_reset_halt = 0; g_error = "";
+   while(!FileIsEnding(h))
+   {
+      string line = FileReadString(h);
+      StringTrimLeft(line); StringTrimRight(line);
+      if(line == "" || StringGetCharacter(line, 0) == '#') continue;
+      int eq = StringFind(line, "=");
+      if(eq < 0) continue;
+      string key = StringSubstr(line, 0, eq), val = StringSubstr(line, eq + 1);
+      if(key == "version") g_version = (int)StringToInteger(val);
+      else if(key == "enabled") g_enabled = StringToInteger(val) != 0;
+      else if(key == "account") g_account = val;
+      else if(key == "balance_scale") g_scale = StringToDouble(val);
+      else if(key == "max_daily_loss_pct") g_max_daily = StringToDouble(val);
+      else if(key == "max_total_dd_pct") g_max_dd = StringToDouble(val);
+      else if(key == "max_open_risk_pct") g_max_open = StringToDouble(val);
+      else if(key == "reset_halt") g_reset_halt = (int)StringToInteger(val);
+      else if(key == "sleeve")
+      {
+         CSleeve *s = new CSleeve();
+         string parts[];
+         int n = StringSplit(val, ';', parts);
+         for(int i = 0; i < n; i++)
+         {
+            int c = StringFind(parts[i], ":");
+            if(c > 0) SetSleeveField(s, StringSubstr(parts[i], 0, c), StringSubstr(parts[i], c + 1));
+         }
+         s.magic = InpMagicBase + s.id;
+         if(!s.Init()) Print("QB_Host: sleeve ", s.id, " ", s.sym, " disabled: ", s.error);
+         int k = ArraySize(g_sleeves);
+         ArrayResize(g_sleeves, k + 1);
+         g_sleeves[k] = s;
+      }
+   }
+   FileClose(h);
+
+   // Refuse a config written for the other kind of account.
+   bool is_demo = AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO;
+   if((g_account == "demo" && !is_demo) || (g_account == "live" && is_demo) || g_account == "")
+   {
+      g_error = "account mismatch: config account=" + g_account + " but terminal is " + (is_demo ? "demo" : "live");
+      g_enabled = false;
+   }
+   if(g_scale <= 0 || g_scale > 10) { g_error = "balance_scale out of range"; g_enabled = false; }
+
+   // Reset a drawdown halt when the config carries a newer reset_halt counter.
+   if(g_reset_halt > (int)GvGet("reset", 0))
+   {
+      GvSet("reset", g_reset_halt);
+      GvSet("halted", 0);
+      GvSet("peak", AccountInfoDouble(ACCOUNT_EQUITY));
+   }
+   CloseOrphans();
+   PrintFormat("QB_Host: loaded %s v%d, %d sleeves, enabled=%d %s", g_path, g_version,
+               ArraySize(g_sleeves), g_enabled, g_error);
+   return true;
+}
+
+//+------------------------------------------------------------------+
+double GvGet(const string k, const double def)
+{
+   string n = g_gv + k;
+   return GlobalVariableCheck(n) ? GlobalVariableGet(n) : def;
+}
+void GvSet(const string k, const double v) { GlobalVariableSet(g_gv + k, v); }
+
+bool IsQbMagic(const long m) { return m >= InpMagicBase && m < InpMagicBase + QB_MAGIC_SPAN; }
+
+CSleeve *SleeveByMagic(const long m)
+{
+   for(int i = 0; i < ArraySize(g_sleeves); i++) if(g_sleeves[i].magic == m) return g_sleeves[i];
+   return NULL;
+}
+
+void CloseAll(const string why)
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || !IsQbMagic(PositionGetInteger(POSITION_MAGIC))) continue;
+      g_trade.SetExpertMagicNumber(PositionGetInteger(POSITION_MAGIC));
+      if(!g_trade.PositionClose(t)) Print("QB_Host: close failed ", t, " ", g_trade.ResultRetcodeDescription());
+   }
+   if(why != "") Print("QB_Host: closed all positions: ", why);
+}
+
+// Positions whose sleeve is no longer in the config are closed.
+void CloseOrphans()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      long m = PositionGetInteger(POSITION_MAGIC);
+      if(t == 0 || !IsQbMagic(m) || SleeveByMagic(m) != NULL) continue;
+      g_trade.PositionClose(t);
+      Print("QB_Host: closed orphan position ", t, " magic ", m);
+   }
+}
+
+bool PositionFor(CSleeve *s, ulong &ticket)
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(t != 0 && PositionGetInteger(POSITION_MAGIC) == s.magic && PositionGetString(POSITION_SYMBOL) == s.sym)
+      { ticket = t; return true; }
+   }
+   return false;
+}
+
+double OpenRiskPct()
+{
+   double r = 0; ulong t;
+   for(int i = 0; i < ArraySize(g_sleeves); i++) if(PositionFor(g_sleeves[i], t)) r += g_sleeves[i].risk;
+   return r;
+}
+
+//+------------------------------------------------------------------+
+// Returns true when trading may continue this tick.
+bool RiskGate()
+{
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   MqlDateTime now; TimeToStruct(TimeTradeServer(), now);
+   double today = now.year * 1000 + now.day_of_year;
+   if(GvGet("day", 0) != today) { GvSet("day", today); GvSet("day_start", eq); GvSet("halted_today", 0); }
+   double peak = MathMax(GvGet("peak", eq), eq);
+   GvSet("peak", peak);
+
+   if(!g_enabled)
+   {
+      if(g_error == "") CloseAll("");   // explicit disable closes everything; errors just stop entries
+      return false;
+   }
+   if(GvGet("halted", 0) > 0) return false;
+   if(GvGet("halted_today", 0) > 0) return false;
+
+   double day_start = GvGet("day_start", eq);
+   if(g_max_daily > 0 && eq <= day_start * (1 - g_max_daily / 100.0))
+   {
+      GvSet("halted_today", 1);
+      CloseAll(StringFormat("daily loss limit %.1f%% hit", g_max_daily));
+      return false;
+   }
+   if(g_max_dd > 0 && eq <= peak * (1 - g_max_dd / 100.0))
+   {
+      GvSet("halted", 1);
+      CloseAll(StringFormat("total drawdown limit %.1f%% hit; halted until reset_halt", g_max_dd));
+      return false;
+   }
+   return true;
+}
+
+bool InSession(CSleeve *s, datetime t)
+{
+   MqlDateTime dt; TimeToStruct(t, dt);
+   if(s.s_start <= s.s_end) return dt.hour >= s.s_start && dt.hour < s.s_end;
+   return dt.hour >= s.s_start || dt.hour < s.s_end;
+}
+
+void ProcessSleeve(CSleeve *s, const bool may_enter)
+{
+   if(s.sig == NULL) return;
+   datetime bar = iTime(s.sym, s.tf, 0);
+   if(bar == 0 || bar == s.last_bar) return;
+   s.last_bar = bar;
+   g_trade.SetExpertMagicNumber(s.magic);
+
+   ulong ticket;
+   if(PositionFor(s, ticket))
+   {
+      int held = iBarShift(s.sym, s.tf, (datetime)PositionGetInteger(POSITION_TIME));
+      if(held >= s.max_bars) g_trade.PositionClose(ticket);
+      else return;
+   }
+   if(!may_enter || !InSession(s, bar)) return;
+   int dir = s.sig.Direction();
+   if(dir == 0) return;
+   if(g_max_open > 0 && OpenRiskPct() + s.risk > g_max_open + 1e-9) return;
+   if(s.max_spread > 0 && SymbolInfoInteger(s.sym, SYMBOL_SPREAD) > s.max_spread) return;
+
+   double atr[1];
+   if(CopyBuffer(s.atr, 0, 1, 1, atr) != 1 || atr[0] <= 0) return;
+   double sl_dist = s.sl_atr * atr[0], tp_dist = s.tp_atr * atr[0];
+   double lots = QB_LotsForRiskScaled(s.sym, s.risk, sl_dist, g_scale);
+   if(lots <= 0) return;
+   int digits = (int)SymbolInfoInteger(s.sym, SYMBOL_DIGITS);
+   string cmt = StringFormat("QB s%d f%d", s.id, (int)s.fam);
+   if(dir > 0)
+   {
+      double ask = SymbolInfoDouble(s.sym, SYMBOL_ASK);
+      g_trade.Buy(lots, s.sym, ask, NormalizeDouble(ask - sl_dist, digits), NormalizeDouble(ask + tp_dist, digits), cmt);
+   }
+   else
+   {
+      double bid = SymbolInfoDouble(s.sym, SYMBOL_BID);
+      g_trade.Sell(lots, s.sym, bid, NormalizeDouble(bid + sl_dist, digits), NormalizeDouble(bid - tp_dist, digits), cmt);
+   }
+}
+
+//+------------------------------------------------------------------+
+string JsonEsc(string s) { StringReplace(s, "\\", "\\\\"); StringReplace(s, "\"", "\\\""); return s; }
+
+void WriteStatus(const bool trading)
+{
+   string base = InpConfig;
+   StringReplace(base, ".cfg", "");
+   int h = FileOpen("QB\\host_status_" + base + ".json", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(h == INVALID_HANDLE) return;
+   bool is_demo = AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO;
+   string js = StringFormat(
+      "{\"time\":\"%s\",\"config\":\"%s\",\"version\":%d,\"enabled\":%s,\"trading\":%s,"
+      "\"account_mode\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,"
+      "\"day_start\":%.2f,\"peak\":%.2f,\"halted\":%s,\"halted_today\":%s,"
+      "\"algo_trading_allowed\":%s,\"skipped_minlot\":%d,\"open_risk_pct\":%.3f,\"error\":\"%s\",\"sleeves\":[",
+      TimeToString(TimeTradeServer(), TIME_DATE | TIME_SECONDS), InpConfig, g_version,
+      g_enabled ? "true" : "false", trading ? "true" : "false", is_demo ? "demo" : "live",
+      AccountInfoString(ACCOUNT_CURRENCY), AccountInfoDouble(ACCOUNT_BALANCE), AccountInfoDouble(ACCOUNT_EQUITY),
+      GvGet("day_start", 0), GvGet("peak", 0), GvGet("halted", 0) > 0 ? "true" : "false",
+      GvGet("halted_today", 0) > 0 ? "true" : "false",
+      (TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && MQLInfoInteger(MQL_TRADE_ALLOWED)) ? "true" : "false",
+      g_qb_skipped_minlot, OpenRiskPct(), JsonEsc(g_error));
+   for(int i = 0; i < ArraySize(g_sleeves); i++)
+   {
+      CSleeve *s = g_sleeves[i];
+      ulong t; bool open = PositionFor(s, t);
+      js += StringFormat("%s{\"id\":%d,\"symbol\":\"%s\",\"tf\":\"%s\",\"family\":%d,\"risk\":%.3f,"
+                         "\"magic\":%I64d,\"open\":%s,\"error\":\"%s\"}",
+                         i ? "," : "", s.id, s.sym, TfToString(s.tf), (int)s.fam, s.risk, s.magic,
+                         open ? "true" : "false", JsonEsc(s.error));
+   }
+   js += "]}";
+   FileWriteString(h, js);
+   FileClose(h);
+}
+
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   g_path = "QB\\" + InpConfig;
+   string base = InpConfig; StringReplace(base, ".cfg", "");
+   g_gv = "QB_" + base + "_";
+   g_trade.SetDeviationInPoints(20);
+   LoadConfig();
+   g_cfg_mtime = (datetime)FileGetInteger(g_path, FILE_MODIFY_DATE, true);
+   EventSetTimer(InpTimerSec);
+   return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   ClearSleeves();
+}
+
+void OnTimer()
+{
+   datetime m = (datetime)FileGetInteger(g_path, FILE_MODIFY_DATE, true);
+   if(m != g_cfg_mtime) { g_cfg_mtime = m; LoadConfig(); }
+
+   bool trading = RiskGate();
+   for(int i = 0; i < ArraySize(g_sleeves); i++) ProcessSleeve(g_sleeves[i], trading);
+
+   datetime now = TimeLocal();
+   if(now - g_last_status >= 5) { WriteStatus(trading); g_last_status = now; }
+}
+
+void OnTick() {}

@@ -28,6 +28,18 @@ research:
   history_start: 2019-01-01
   holdout_months: 12
 
+deployment:
+  # Written into portfolio_<target>.cfg and enforced by QB_Host itself.
+  max_daily_loss_pct: 5
+  max_total_dd_pct: 30
+  max_open_risk_pct: 6
+  # Risk used for demo forward-test sleeves that did not pass the gauntlet (allow_unvalidated).
+  unvalidated_risk_pct: 0.5
+  # Forward-test bar before a sleeve may be promoted to live.
+  promote_min_trades: 30
+  promote_min_days: 28
+  magic_base: 900000          # must match QB_Host InpMagicBase
+
 paths:
   registry_db: runtime\registry.sqlite
   reports: runtime\reports

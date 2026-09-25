@@ -62,3 +62,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     started     TEXT,
     finished    TEXT
 );
+
+-- Portfolio configs proposed to / applied on a terminal (target = demo | live).
+CREATE TABLE IF NOT EXISTS deployments (
+    id          INTEGER PRIMARY KEY,
+    target      TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    sha256      TEXT NOT NULL,
+    config      TEXT NOT NULL,
+    sleeves     TEXT NOT NULL,      -- JSON
+    status      TEXT NOT NULL,      -- proposed | applied | superseded | rejected | kill
+    note        TEXT,
+    created     TEXT NOT NULL DEFAULT (datetime('now')),
+    applied     TEXT
+);

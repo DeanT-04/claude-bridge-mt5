@@ -8,6 +8,7 @@ import numpy as np
 from ..engine import Costs, atr_sma, server_hour, simulate
 
 EXPERT = "QB\\QB_Donchian.ex5"
+fid = 0   # ENUM_QB_FAMILY value in Signals.mqh (QB_Host runs it as a sleeve)
 
 
 @dataclass(frozen=True)

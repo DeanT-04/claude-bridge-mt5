@@ -8,8 +8,8 @@ validate (gauntlet) → confirm in the MT5 Strategy Tester → approval-gated de
 | Milestone | Scope | State |
 |---|---|---|
 | M1 | Bridge, tester automation, research engine, gauntlet, MT5 parity | ✅ done |
-| M2 | Symbol auto-discovery + cost filter, 7 strategy families, research queue | 🔨 in progress |
-| M3 | Portfolio host EA, approval-gated demo deployment, monitoring, `promote_to_live` | planned |
+| M2 | Symbol auto-discovery + cost filter, 7 strategy families, research queue | ✅ done |
+| M3 | Portfolio host EA, approval-gated demo deployment, monitoring, `promote_to_live` | 🔨 in progress |
 | M4 | Generated / genetic strategies (grammar → Python + MQL5) | planned |
 | M5 | ML strategies (ONNX) | planned |
 | M6 | Live readiness + VPS migration | planned |
@@ -43,7 +43,8 @@ runtime\tester\terminal64.exe /portable # once: log into a BlackBull demo (save 
 - MCP server (`.mcp.json`): `python -m bridge.mcp_server`. Tools: `account_info`, `list_symbols`,
   `symbol_spec`, `get_bars`, `compile_expert`, `run_backtest`, `run_optimization`,
   `run_gauntlet`, `universe`, `scan_universe`, `enqueue_research`, `start_research`,
-  `research_status`, `research_survivors`, `list_gauntlets`, `get_gauntlet`. None of them place orders.
+  `research_status`, `research_survivors`, `list_gauntlets`, `get_gauntlet`, plus the deployment
+  tools below. None of them place orders directly.
 - Research CLI:
   ```
   python scripts/research.py scan                     # discover + filter all broker symbols
@@ -75,6 +76,40 @@ time exit and a session filter.
 history depth, `cost_atr` (median spread ÷ median H1 ATR) and `minlot_risk_pct` (the % of £100
 lost by the minimum lot at a 1.5×ATR stop). **Researchable** means cost_atr ≤ 0.15 and ≥ 3 years
 of history. **Small-account** additionally means the minimum lot fits the 5% risk cap.
+
+## Deployment (QB_Host)
+`QB_Host` is one EA that you attach to any chart once, in the main terminal. It trades every
+**sleeve** (one strategy family on one symbol/timeframe) listed in
+`%APPDATA%\MetaQuotes\Terminal\Common\Files\QB\portfolio_<demo|live>.cfg`, using the same signal
+code the backtests use. It reloads the file whenever it changes and writes
+`host_status_portfolio_<target>.json` every 5 seconds.
+
+Safety enforced inside the EA, so it holds even if Claude or the bridge is offline:
+- the config's `account=demo|live` must match the terminal's account type
+- `enabled=0` closes every QB position and stops trading
+- daily loss limit closes everything and pauses until the next server day
+- total drawdown limit closes everything and halts until an approved `reset_halt`
+- open-risk cap (sum of sleeve risk %) and an optional per-sleeve spread filter
+- positions of sleeves removed from the config are closed
+
+Flow (MCP tools):
+1. `install_host` compiles QB_Host into the main terminal. Then attach it to any chart once,
+   with Algo Trading enabled.
+2. `portfolio_allocation` gives correlation, inverse-vol risk and a combined Monte Carlo check,
+   computed only on pre-holdout data.
+3. `propose_deployment` drafts the full config plus a diff and changes nothing on the terminal.
+4. The user approves in chat. `apply_deployment` is marked destructive, so Claude Code prompts for
+   it every time; it writes exactly the reviewed config (the sha256 must match, and the file must
+   be unchanged since the proposal).
+5. `deployment_status`, `forward_test_report` (per-sleeve R, profit, drift test vs backtest).
+6. `kill_switch` stops everything immediately and needs no approval.
+7. `promote_to_live` is refused unless `account.live_enabled: true` and every sleeve passed the
+   gauntlet and its forward test (≥30 trades, ≥28 days, no drift). It then goes through the same
+   propose → approve → apply path. Live should run in its own terminal (or VPS) so the demo
+   history stays readable.
+
+Sleeves that failed the gauntlet can run **on demo only** with `allow_unvalidated=True`, at a
+fixed 0.5% risk, for plumbing and forward-test experiments. Live never accepts them.
 
 ## The gauntlet (gate to demo)
 Pre-screen (150 random configs; the best must reach Sharpe 0.5, or the job stops early) →
@@ -116,4 +151,10 @@ Thresholds are in `config/gauntlet.yaml`.
   H1 1.22), Keltner SPX500 H1 (1.03) and Donchian/ORB USDJPY M30. Their profit factors of 1.1–1.2 sit below
   the 1.25 gate, and none survives the multiple-testing correction. RSI reversion on USDCAD H1
   passed every stage except the Deflated Sharpe test (DSR 0.07). The 12-month holdout is still unused for all of them.
+- **£100 and minimum lots:** the smallest possible position on the £100-feasible symbols still
+  risks about 1.5–4% of £100 at a 1.5×ATR stop. Kelly/Monte-Carlo sizes below that can't be
+  executed and are skipped by the min-lot guard. A £100 account therefore implies at least
+  ~1.5–4% risk per trade, or much tighter stops.
+- Known limitation: `portfolio_allocation` re-runs each sleeve's *final* (in-sample tuned)
+  params, so its Sharpe figures are optimistic. It should use walk-forward OOS trades instead.
 - MT5 build 6182 starts its own built-in MCP server (127.0.0.1:22346); to be explored.

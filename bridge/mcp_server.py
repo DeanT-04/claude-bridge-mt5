@@ -1,8 +1,8 @@
 """MCP server exposing the BlackBull MT5 research bridge to Claude.
 
 Run: python -m bridge.mcp_server   (registered in .mcp.json)
-No tool here can place orders or change a live deployment; that arrives in M3 behind
-explicit user approval.
+No tool places orders directly. Trading happens only through QB_Host reading a portfolio
+config, and a config changes only via apply_deployment (user-approved) or kill_switch (stop).
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mcp.server.mcpserver import MCPServer  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 
 from bridge import compiler, config, mt5_client, tester  # noqa: E402
 from registry import db  # noqa: E402
@@ -187,6 +188,96 @@ def research_survivors() -> list[dict]:
     """Strategies that passed the gauntlet (or await MT5 confirmation), with OOS metrics and sizing."""
     from research import jobqueue
     return jobqueue.survivors()
+
+
+# ------------------------------------------------------------------ deployment (M3)
+@mcp.tool()
+def install_host() -> dict:
+    """Sync the QB sources into the main (demo/live) terminal and compile QB_Host there.
+    Afterwards the user attaches QB_Host to any chart once and enables Algo Trading."""
+    dest = config.path(config.settings()["terminal"]["data_dir"]) / "MQL5"
+    return compiler.compile_expert("QB_Host", dest)
+
+
+@mcp.tool()
+def portfolio_allocation(gauntlet_ids: list[int], budget_pct: float | None = None) -> dict:
+    """Correlation, inverse-vol risk allocation and combined Monte Carlo for a set of gauntlet
+    results (last 3 years). budget_pct defaults to deployment.max_open_risk_pct."""
+    from research import portfolio
+    con = db.connect()
+    sleeves = []
+    for gid in gauntlet_ids:
+        g = db.gauntlet(con, gid)
+        risk = (g["stages"].get("sizing_montecarlo", {}).get("risk") or 0) * 100 \
+            or config.settings()["deployment"]["unvalidated_risk_pct"]
+        sleeves.append({**g, "risk_pct": risk})
+    lim = config.settings()["deployment"]
+    return portfolio.build(sleeves, budget_pct or lim["max_open_risk_pct"],
+                           config.gauntlet()["montecarlo"]["dd95_max_pct"] / 100)
+
+
+@mcp.tool()
+def propose_deployment(add_gauntlet_ids: list[int] | None = None, remove_sleeve_ids: list[int] | None = None,
+                       target: str = "demo", allow_unvalidated: bool = False, enabled: bool = True,
+                       limits: dict | None = None, reset_halt: bool = False, note: str = "",
+                       balance_scale: float | None = None) -> dict:
+    """Draft a new QB_Host config. Changes NOTHING on the terminal. Returns the full config, a
+    diff against the running one, and proposal_id + sha256. Show the user the diff and wait for
+    their explicit approval in chat before calling apply_deployment. allow_unvalidated lets a
+    sleeve that failed the gauntlet forward-test on demo only (small fixed risk).
+    balance_scale: None on demo = size as the £100 target account; 1.0 = the demo's own equity."""
+    from bridge import deploy
+    from research import gauntlet
+    scale = balance_scale
+    if target == "demo" and scale is None:
+        acct = mt5_client.account_info()
+        rate = 1 / gauntlet.acct_to_target_rate(mt5_client.symbol_spec, acct["currency"],
+                                                config.settings()["account"]["currency"])
+        scale = deploy.demo_balance_scale(acct, rate)
+    return deploy.propose(target, add_gauntlet_ids, remove_sleeve_ids, allow_unvalidated, enabled,
+                          limits, scale, reset_halt, note)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+def apply_deployment(proposal_id: int, sha256: str) -> dict:
+    """Write an approved proposal to the terminal; QB_Host picks it up within a second and starts
+    trading it. ONLY call after the user has explicitly approved this exact proposal in chat."""
+    from bridge import deploy
+    return deploy.apply(proposal_id, sha256)
+
+
+@mcp.tool()
+def kill_switch(target: str = "demo", reason: str = "") -> dict:
+    """Immediately disable a portfolio: QB_Host closes every QB position and stops trading.
+    Safe to call at any time; re-enabling requires a new approved proposal."""
+    from bridge import deploy
+    return deploy.kill(target, reason)
+
+
+@mcp.tool()
+def deployment_status(target: str = "demo") -> dict:
+    """Running config (sleeves, limits, version) plus QB_Host's live status file (equity,
+    drawdown state, halts, open sleeves, errors)."""
+    from dataclasses import asdict
+    from bridge import deploy
+    return {"portfolio": asdict(deploy.current(target)), "host": deploy.host_status(target)}
+
+
+@mcp.tool()
+def forward_test_report(target: str = "demo") -> dict:
+    """Per-sleeve forward-test results from the terminal's deal history: trades, R, profit,
+    drift test vs backtest, and whether each sleeve is ready for live."""
+    from bridge import monitor
+    return monitor.forward_report(target)
+
+
+@mcp.tool()
+def promote_to_live(sleeve_ids: list[int], force: bool = False) -> dict:
+    """Draft a LIVE config from demo sleeves that passed the gauntlet and their forward test.
+    Refused unless account.live_enabled is true. Like any proposal it changes nothing until
+    the user approves and apply_deployment is called."""
+    from bridge import monitor
+    return monitor.promote_to_live(sleeve_ids, force)
 
 
 @mcp.tool()
