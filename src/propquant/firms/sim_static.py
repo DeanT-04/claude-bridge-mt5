@@ -35,7 +35,7 @@ def _day(bal, floor_total, floor_day, size, d_close, d_low, a, b):
 
 @njit(cache=True)
 def sim_phase(d_close, d_low, sess_start, sess_day, s0, size, start, target, daily_loss,
-              max_loss, min_days, time_limit):  # fmt: skip
+              max_loss, min_days, time_limit, min_day_profit):  # fmt: skip
     """Returns (outcome, last_session, sessions_used)."""
     bal, days = start, 0
     floor_total = start - max_loss
@@ -43,11 +43,13 @@ def sim_phase(d_close, d_low, sess_start, sess_day, s0, size, start, target, dai
     for s in range(s0, n):
         if time_limit > 0 and sess_day[s] - sess_day[s0] >= time_limit:
             return EXPIRED, s, s - s0
+        day_start = bal
         bal, breached, traded = _day(bal, floor_total, bal - daily_loss, size[s], d_close,
                                      d_low, sess_start[s], sess_start[s + 1])  # fmt: skip
         if breached:
             return FAIL, s, s - s0 + 1
-        if traded:
+        # a counted day: any traded day, or (if set) a day with >= min_day_profit realised
+        if traded and (min_day_profit <= 0.0 or bal - day_start >= min_day_profit):
             days += 1
         if bal >= start + target and days >= min_days:
             return PASS, s, s - s0 + 1
@@ -56,24 +58,29 @@ def sim_phase(d_close, d_low, sess_start, sess_day, s0, size, start, target, dai
 
 @njit(cache=True)
 def sim_funded(d_close, d_low, sess_start, sess_day, s1, size, start, daily_loss, max_loss,
-               split, payout_days, horizon_days):  # fmt: skip
+               split, payout_days, horizon_days, min_day_profit, cycle_active_days):  # fmt: skip
     """Returns (outcome, payouts, total_paid_to_trader, first_payout_session)."""
     bal = start
     floor_total = start - max_loss
     n = len(sess_start) - 1
-    k, paid, first = 0, 0.0, -1
+    k, paid, first, active = 0, 0.0, -1, 0
     last_pay_day = sess_day[s1] if s1 < n else 0
     for s in range(s1, n):
         if sess_day[s] - sess_day[s1] >= horizon_days:
             return NO_DATA, k, paid, first
-        bal, breached, _ = _day(bal, floor_total, bal - daily_loss, size[s], d_close, d_low,
-                                sess_start[s], sess_start[s + 1])  # fmt: skip
+        day_start = bal
+        bal, breached, traded = _day(bal, floor_total, bal - daily_loss, size[s], d_close, d_low,
+                                     sess_start[s], sess_start[s + 1])  # fmt: skip
         if breached:
             return FAIL, k, paid, first
-        if sess_day[s] - last_pay_day >= payout_days and bal > start:
+        if traded and (min_day_profit <= 0.0 or bal - day_start >= min_day_profit):
+            active += 1
+        if (sess_day[s] - last_pay_day >= payout_days and bal > start
+                and active >= cycle_active_days):  # fmt: skip
             paid += (bal - start) * split
             bal = start
             k += 1
+            active = 0
             last_pay_day = sess_day[s]
             if first < 0:
                 first = s
@@ -82,7 +89,8 @@ def sim_funded(d_close, d_low, sess_start, sess_day, s1, size, start, daily_loss
 
 @njit(parallel=True, cache=True)
 def run_many(d_close, d_low, sess_start, sess_day, starts, size, start, targets, min_days,
-             time_limits, daily_loss, max_loss, split, payout_days, horizon_days):  # fmt: skip
+             time_limits, daily_loss, max_loss, split, payout_days, horizon_days,
+             min_day_profit, cycle_active_days):  # fmt: skip
     """One purchased challenge per start. Columns: outcome (PASS = all phases), sessions used
     for the evaluation, payouts, paid, sessions to first payout."""
     m = len(starts)
@@ -94,7 +102,7 @@ def run_many(d_close, d_low, sess_start, sess_day, starts, size, start, targets,
         for ph in range(len(targets)):
             res, s_end, u = sim_phase(d_close, d_low, sess_start, sess_day, s, size, start,
                                       targets[ph], daily_loss, max_loss, min_days[ph],
-                                      time_limits[ph])  # fmt: skip
+                                      time_limits[ph], min_day_profit)  # fmt: skip
             used += u
             if res != PASS:
                 break
@@ -103,7 +111,8 @@ def run_many(d_close, d_low, sess_start, sess_day, starts, size, start, targets,
         if res == PASS:
             _r, k, paid, first = sim_funded(d_close, d_low, sess_start, sess_day, s, size, start,
                                             daily_loss, max_loss, split, payout_days,
-                                            horizon_days)  # fmt: skip
+                                            horizon_days, min_day_profit,
+                                            cycle_active_days)  # fmt: skip
             out[j, 2], out[j, 3] = k, paid
             out[j, 4] = first - starts[j] if first >= 0 else -1
     return out

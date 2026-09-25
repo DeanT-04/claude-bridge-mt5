@@ -5,3 +5,5 @@ Index of cross-cutting lessons. One note per lesson in this folder; link it here
 - [[Proxy data is trustworthy for NQ]]: free proxy ≈ real futures; research starts 2016
 - [[85 percent pass needs an extreme edge]]: 30-day window binds; EV positive from Sharpe ~2
 - [[Batch 1 - classic intraday families have timing but not enough edge]]: timing real in late_trend/orb/ib; combine them next
+- [[Batches 3-4 - filters, indicators, inbox ideas and portfolios]]: timing is common, tradeable edge is not; portfolio verified but weak
+- [[P7 - firm rules matter as much as the strategy]]: FTMO/Blueberry lift weak edges' payout odds, but slowly and without real edge

@@ -18,8 +18,9 @@ The previous MT5 project is archived on the `archive/mt5-bridge` branch.
 | P3 | numba backtest engine plus anti-cheating tests | ✅ done |
 | P4 | Gauntlet, challenge Monte Carlo, visual reports | ✅ done |
 | P5 | Autonomous research ingestion | ✅ done (YouTube, arXiv, OpenAlex, Oxford Strat, Quantified Strategies via archive) |
-| P6 | Strategy factory | 🔄 batch 1 tested (5 families, all Graveyard) |
-| P7 | Portfolios, then FTMO and Blueberry | — |
+| P6 | Strategy factory: toolkit (indicators + regime filters), 63 pre-registered strategies on NQ and ES | ✅ done |
+| P7 | Portfolios, FTMO 2-Step and Blueberry Prime (verified rules, CFD costs) | ✅ done |
+| Dashboard | `dashboard/`: every strategy, run, optimisation grid, gates and evidence | ✅ done |
 
 ## Promotion tiers
 Strategies are ranked by **end-to-end payout rate**: the chance that one purchased evaluation passes and then reaches a payout. Everything is measured out-of-sample, across challenge simulations that each start on a different session.
@@ -31,6 +32,16 @@ Strategies are ranked by **end-to-end payout rate**: the chance that one purchas
 | **Contender** | All statistical gates pass, with end-to-end payout ≥ 35% and evaluation pass ≥ 45%. |
 
 The tiers were set after the synthetic calibration and before any real strategy was tested: an 85% pass rate needs an annualised Sharpe of about 8 under Apex's 30-day window. Full details are in `config/research.yaml`.
+
+## Headline result (2026-09-25)
+**No strategy has passed yet. That's the honest outcome, and the evidence is in the dashboard and the vault.**
+- More than 120 strategy tests ran on NQ and ES, with several hundred counted trials: batches 1–4, regime-filtered variants, indicator templates, inbox-derived ideas, a portfolio, and FTMO/Blueberry transfers.
+- Real timing is common: dozens of strategies beat at least 95% of random-entry runs.
+- A statistically real, tradeable edge isn't. Out-of-sample Deflated Sharpe is at most about 0.3 everywhere.
+- Under Apex, the best strategy reaches a payout on about 11% of purchased evaluations.
+- Under FTMO's static, no-deadline rules the same weak edges reach 25–30%, but it takes months to pass and there's still no statistical edge.
+- The research inbox's own best evidence (a walk-forward study on MNQ with costs) found the same thing: plain OHLC intraday rules don't survive.
+- **Next:** different information rather than more rule variants. That means cross-asset signals, event calendars, and the forward-collected real futures data as a clean new holdout.
 
 ## Findings so far
 - **Free data works.** Dukascopy's keyless chart feed has 1-minute NASDAQ-100 and S&P 500 CFD bid/ask bars from 2012-01-19. It trades 18:00–16:15 ET, so it has no bars 16:15–17:00 ET. Yahoo supplies real CME futures bars for comparison: 1m for 8 days, 5m for 60 days, 1h for about 2 years.
@@ -57,6 +68,13 @@ The tiers were set after the synthetic calibration and before any real strategy 
   - Published intraday momentum shows nothing on NQ.
   - Opening-range breakout and initial-balance breakout are 0.98 correlated, effectively the same strategy, and stacking the families barely raises the Sharpe.
   - Details are in the vault lesson on batch 1.
+- **Batches 3–4, portfolios and CFD firms** (vault lessons *Batches 3-4* and *P7*):
+  - Regime filters and indicator templates didn't create an edge.
+  - The six ideas triaged from the 336-item research inbox all failed.
+  - A six-family timing portfolio beat 100% of random entries but had DSR 0.15.
+  - The portfolio maths is verified: a one-member portfolio reproduces the single strategy exactly.
+  - FTMO and Blueberry rules were verified from their own pages and help centres, with open questions listed.
+- **Parallel compute:** `gauntlet batch --shard i/n` runs n workers. Capping numba threads per worker keeps the 4-core laptop at 8 busy threads without oversubscribing.
 - **Pre-registration is enforced:** the gauntlet won't test a strategy without its `Ideas/` note, and each run records the note's hash.
 - **Apex's rules are verified** from Internet Archive captures of Apex's own help pages (the live site blocks bots). Both plan types, EOD and Intraday trailing, are encoded in `config/firms/apex.yaml`. Each rule cites its source, and every unresolved question is listed in that file. 50K list prices: EOD evaluation $550 plus $139 activation; Intraday evaluation $249 plus $59 activation.
 - **The challenge simulator** (`propquant.firms.sim`) runs the evaluation, then the funded account, then payouts. It covers trailing type and lock level, the daily loss limit, the 30-day access window, PA scaling tiers, the 5 qualifying days, 50% consistency, the safety net and the payout caps. Where a bar is ambiguous it assumes the worst case, and each rule has a boundary test.
@@ -77,6 +95,13 @@ uv run propquant firms note apex            # write verified firm rules into the
 uv run propquant gauntlet run control_random  # full gauntlet + evidence note in the vault
 uv run propquant research collect             # autonomous: YouTube, papers, strategy sites
 uv run propquant research inbox               # list new research items
+uv run propquant gauntlet batch --symbol NQ --shard 0/3   # one of 3 parallel workers (set NUMBA_NUM_THREADS=2)
+uv run propquant gauntlet portfolio portfolio_timing --members late_trend,orb,macd_trend_5m
+uv run propquant gauntlet cfd late_trend,orb --firm ftmo  # FTMO 2-Step (or --firm blueberry)
+uv run propquant dashboard build                          # then open dashboard/index.html
 ```
+
+The dashboard is a static page: open `dashboard/index.html` directly, or serve the repo root
+(`python -m http.server`) so the evidence images from `docs/vault` load too.
 
 Environment overrides: `PROPQUANT_VAULT` (vault path), `PROPQUANT_DATA` (data directory; default `data/`, gitignored).

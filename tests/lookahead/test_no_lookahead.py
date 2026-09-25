@@ -96,7 +96,7 @@ get("control_random")  # populate the registry (imports every family)
 def test_strategy_orders_are_causal(name: str, seed: int) -> None:
     if getattr(REGISTRY[name], "filter_name", None):
         pytest.skip("filtered variant: base tested here, filter masks in test_filters.py")
-    md = synthetic_md(seed, sessions=25)
+    md = synthetic_md(seed, sessions=60)
     strat = REGISTRY[name]()
     a = strat.orders(md)
     assert (a.order_type != 0).any(), f"{name} placed no orders: causality test would be vacuous"

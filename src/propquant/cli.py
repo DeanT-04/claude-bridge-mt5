@@ -191,7 +191,9 @@ def gauntlet_batch(
     reg = Registry()
     done = {r[0] for r in reg.con.execute("SELECT DISTINCT strategy FROM runs").fetchall()}
     reg.close()
-    names = [n for n, c in sorted(REGISTRY.items()) if c.needs_idea_note and match in n]
+    pats = [m for m in match.split(",") if m] or [""]
+    names = [n for n, c in sorted(REGISTRY.items())
+             if c.needs_idea_note and any(m in n for m in pats)]  # fmt: skip
     i, n_shards = (int(x) for x in shard.split("/"))
     names = names[i::n_shards]
     for n in names:
@@ -236,6 +238,27 @@ def gauntlet_portfolio(
     console.print(f"[bold]{label}: {res.verdict.upper()}[/bold]  ({res.holdout_note})")
     console.print(report.write(res))
     console.print(export.write(res))
+    leaderboard.update()
+
+
+@gauntlet_app.command("cfd")
+def gauntlet_cfd(
+    names: str = typer.Argument(..., help="Comma list of strategies (optionally name@ES)"),
+    firm: str = typer.Option("ftmo", help="ftmo (2-Step) | blueberry (Prime)"),
+) -> None:
+    """Transfer test under a CFD firm's rules with CFD costs (P7)."""
+    from propquant.gauntlet import cfd
+    from propquant.vault import leaderboard
+
+    for n in names.split(","):
+        name, _, sym = n.partition("@")
+        rec = cfd.run(name, sym or "NQ", log=console.print, firm=firm)
+        c = rec["oos_challenge"][rec["best_plan"]]
+        console.print(
+            f"{rec['strategy']:<36} {rec['verdict']:<10} pass={c['eval_pass']:.2f} "
+            f"e2e={c['end_to_end_payout']:.2f} ev=${c['ev_per_attempt']:,.0f} "
+            f"dsr={rec['stats']['dsr']:.2f}"
+        )
     leaderboard.update()
 
 

@@ -52,9 +52,12 @@ def session_path(d_close, d_low, d_high, sess_start) -> tuple[np.ndarray, np.nda
     return c, lo, hi
 
 
-def _member_runs(m: Member, cfg: dict, reg: Registry, run_id: str, log) -> dict:
+def _member_runs(m: Member, cfg: dict, reg: Registry, run_id: str, log,
+                 costs: Costs | None = None, key_suffix: str = "") -> dict:  # fmt: skip
     """Sweep the member's grid on dev data, pick params per fold (training only), and return
-    per-session paths for each chosen config plus the member's final (all-dev) choice."""
+    per-session paths for each chosen config plus the member's final (all-dev) choice.
+    `costs` overrides the Apex futures costs (e.g. a CFD model); trials are then recorded under
+    `<key><key_suffix>` because different costs make them different configurations."""
     cls = get(m.name)
     md = MarketData.load(m.symbol, cls.timeframe)
     first = int(np.searchsorted(md.sess_day, config.day_number(cfg["research_start"])))
@@ -63,9 +66,10 @@ def _member_runs(m: Member, cfg: dict, reg: Registry, run_id: str, log) -> dict:
     md = md.slice_sessions(first, end)
     dev_end = int(np.searchsorted(md.sess_day, config.day_number(cfg["holdout_start"])))
     md_dev = md.slice_sessions(0, dev_end)
-    costs = Costs.micro(m.symbol, slip_ticks=cfg["costs"]["slip_ticks"])
-    spec = challenge(cfg["firm"]["name"], "eod", cfg["firm"]["size"])
-    costs.commission_side = spec.commission_micro_rt / 2
+    if costs is None:
+        costs = Costs.micro(m.symbol, slip_ticks=cfg["costs"]["slip_ticks"])
+        spec = challenge(cfg["firm"]["name"], "eod", cfg["firm"]["size"])
+        costs.commission_side = spec.commission_micro_rt / 2
     grid = param_grid(cls)
     daily, counts, results = [], [], {}
     for p in grid:
@@ -76,7 +80,7 @@ def _member_runs(m: Member, cfg: dict, reg: Registry, run_id: str, log) -> dict:
         daily.append(d)
         counts.append(cnt)
         results[json.dumps(p, sort_keys=True)] = r
-    reg.add_trials(run_id, m.key, cls.family,
+    reg.add_trials(run_id, m.key + key_suffix, cls.family,
                    [(p, "dev", stats.sharpe(d)) for p, d in zip(grid, daily, strict=True)],
                    md_dev.data_hash)  # fmt: skip
     folds = []

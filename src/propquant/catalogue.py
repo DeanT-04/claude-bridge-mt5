@@ -8,14 +8,14 @@ entries (portfolios and CFD-firm versions), so the denominator is explicit and i
 from propquant.strategies.base import REGISTRY, get
 
 SYMBOLS = ("NQ", "ES")
-PLANNED_P7 = [
-    # portfolios of families with real timing, and the CFD firms (FTMO, Blueberry Funded)
-    {"key": "portfolio_timing@NQ", "stage": "P7 portfolio"},
-    {"key": "portfolio_timing@NQ+ES", "stage": "P7 portfolio"},
-    {"key": "portfolio_best@NQ+ES", "stage": "P7 portfolio"},
-    {"key": "ftmo:best", "stage": "P7 FTMO"},
-    {"key": "blueberry:best", "stage": "P7 Blueberry"},
-]
+TIMING_FAMILIES = ("late_trend", "orb", "ib_breakout", "macd_trend_5m", "donchian_break_15m",
+                   "donchian_break_5m", "supertrend_5m", "ib_twap")  # fmt: skip
+PLANNED_P7 = (
+    # the timing portfolio, and CFD-firm transfers of the families with real timing
+    [{"key": "portfolio_timing", "stage": "P7 portfolio"}]
+    + [{"key": f"ftmo:{n}", "stage": "P7 FTMO"} for n in TIMING_FAMILIES]
+    + [{"key": f"blueberry:{n}", "stage": "P7 Blueberry"} for n in TIMING_FAMILIES]
+)
 
 
 def catalogue() -> list[dict]:

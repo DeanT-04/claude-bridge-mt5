@@ -1,0 +1,155 @@
+# Blueberry Funded (prop arm of Blueberry Markets): Prime (2-phase) and 1-Step Challenge.
+#
+# blueberryfunded.com serves a bot-check ("Please wait ... optimizing your request") page to
+# automated readers, so the marketing site was NOT scraped. Rules were read from the firm's own
+# Intercom help centre, help.blueberryfunded.com, which served plain HTTP on 2026-09-25
+# (`fetched` in `sources`). Every rule cites a source key.
+#
+# PRODUCT CHANGE: the old 2-Step Challenge (10% / 5% targets, 5% daily) was withdrawn from sale on
+# 17 August 2026 (prime_overview). "Prime" is a separate 2-phase product with its own rules; the
+# 2-Step numbers still quoted by review sites do NOT apply to new purchases.
+# Rules also changed for accounts bought on/after 12 March 2026 (prohibited strategies,
+# 1.5% risk per trade idea); this file models accounts bought NOW (after 17 Aug 2026).
+firm: blueberry
+name: Blueberry Funded
+verified_on: 2026-09-25
+platform: mt5            # MT5 and TradeLocker (lot_sizes)
+
+sources:
+  prime_overview:  {url: "https://help.blueberryfunded.com/en/articles/12136509-what-is-the-prime-challenge", fetched: "2026-09-25"}
+  prime_drawdown:  {url: "https://help.blueberryfunded.com/en/articles/12136586-what-are-the-drawdown-limits-on-a-prime-account", fetched: "2026-09-25"}
+  prime_reward:    {url: "https://help.blueberryfunded.com/en/articles/12136624-prime-reward-structure", fetched: "2026-09-25"}
+  prime_news:      {url: "https://help.blueberryfunded.com/en/articles/12140938-news-trading-policy-for-prime-challenge", fetched: "2026-09-25"}
+  prime_breach:    {url: "https://help.blueberryfunded.com/en/articles/12140976-what-happens-if-you-breach-the-rules-in-the-prime-challenge", fetched: "2026-09-25"}
+  prime_lots:      {url: "https://help.blueberryfunded.com/en/articles/14051815-prime-lot-size-restriction-rule", fetched: "2026-09-25"}
+  active_days:     {url: "https://help.blueberryfunded.com/en/articles/12136639-how-many-active-trading-days-do-i-need", fetched: "2026-09-25"}
+  breach_rules:    {url: "https://help.blueberryfunded.com/en/articles/15310153-what-rules-can-breach-my-account-and-where-do-i-find-the-limits", fetched: "2026-09-25"}
+  one_step_guide:  {url: "https://help.blueberryfunded.com/en/articles/14070623-1-step-challenge-complete-guide", fetched: "2026-09-25"}
+  reward_freq:     {url: "https://help.blueberryfunded.com/en/articles/9550911-frequency-of-performance-rewards", fetched: "2026-09-25"}
+  scaling:         {url: "https://help.blueberryfunded.com/en/articles/9762548-blueberry-funded-account-scaling", fetched: "2026-09-25"}
+  weekend:         {url: "https://help.blueberryfunded.com/en/articles/9550589-can-i-hold-positions-over-the-weekend-and-overnight", fetched: "2026-09-25"}
+  leverage:        {url: "https://help.blueberryfunded.com/en/articles/9550888-what-leverage-does-blueberry-funded-offer", fetched: "2026-09-25"}
+  commissions:     {url: "https://help.blueberryfunded.com/en/articles/9715159-trading-commissions", fetched: "2026-09-25"}
+  symbols:         {url: "https://help.blueberryfunded.com/en/articles/17060107-which-trading-symbols-are-available", fetched: "2026-09-25"}
+  lot_sizes:       {url: "https://help.blueberryfunded.com/en/articles/15884345-where-can-i-find-the-minimum-and-maximum-lot-size-for-an-instrument", fetched: "2026-09-25"}
+  refund:          {url: "https://help.blueberryfunded.com/en/articles/9773783-refund-policy", fetched: "2026-09-25"}
+  changes_aug17:   {url: "https://help.blueberryfunded.com/en/articles/16390779-what-s-changing-on-17-august-2026", fetched: "2026-09-25", note: "updated 24 Aug 2026"}
+  pricing:         {url: "https://blueberryfunded.com/", capture: "20260630051144", note: "Internet Archive; `data-prices` attributes on the plan cards + comparison table. Later captures (2026-08-05 on) are the bot-check page, so these prices PRE-DATE the 17 Aug 2026 changes"}
+
+session:
+  day_reset: "17:00"                # breach_rules, one_step_guide: "resets daily at 5:00 PM EST"
+  day_reset_tz: "America/New_York"  # ASSUMED (the pages say "EST" year-round); see open_questions
+
+# How the limits are computed (prime_drawdown, one_step_guide, breach_rules):
+#  - Daily amount is a FIXED dollar amount = pct x INITIAL balance.
+#  - Daily anchor = the HIGHER of balance or equity at the start of the day (17:00 EST reset),
+#    so floating profit held through the reset RAISES the day's floor; floating loss does not
+#    lower it. Floor = anchor - daily amount; breach when equity (or balance) touches it.
+#  - Max overall loss: STATIC floor = initial balance - pct x initial balance (Prime, 1-Step).
+#  - Active trading day = a day with >= 0.5% of the account in REALISED (closed) profit.
+limits:
+  daily_anchor: max_balance_equity_at_reset
+  daily_amount_base: initial_balance
+  active_day_min_realised_pct: 0.5
+
+fees_usd:     # source: pricing (capture 2026-06-30, LIST prices; a 40% "PRIME40" promo was running)
+  prime:    {2.5K: 30, 5K: 55, 10K: 90, 25K: 165, 50K: 325, 100K: 650, 200K: 1170}
+  one_step: {5K: 40, 10K: 75, 25K: 150, 50K: 275, 100K: 550, 200K: 1100}
+
+refund: "none: all purchases final; only duplicate charges or non-delivery on card payments, within 14 days"  # source: refund
+
+programmes:
+  prime:        # source: prime_overview, prime_drawdown, prime_reward, active_days, prime_news, prime_lots, changes_aug17, pricing
+    sizes_usd: [2500, 5000, 10000, 25000, 50000, 100000, 200000]
+    phases:
+      phase1:
+        profit_target_pct: 8
+        daily_loss_pct: 4
+        max_loss_pct: 10
+        max_loss_type: static
+        min_active_days: 3        # changes_aug17: "Prime now requires a minimum of 3 active trading days"; pricing: "3 or 5 Days / Phase"
+        time_limit_days: null     # pricing: "Time Limit: Unlimited"
+        consistency_rule: false
+      phase2:
+        profit_target_pct: 6
+        daily_loss_pct: 4
+        max_loss_pct: 10
+        max_loss_type: static
+        min_active_days: 3
+        time_limit_days: null
+        consistency_rule: false
+    funded:
+      daily_loss_pct: 4
+      max_loss_pct: 10
+      max_loss_type: static
+      profit_split: 0.80
+      reward_cycle_days: 14
+      active_days_per_cycle: 3    # accounts purchased from 17 Aug 2026 (5 before)
+      risk_per_trade_idea_pct: null   # 1.5% rule does NOT apply to Prime
+      consistency_rule: false
+      lot_size_restriction: false
+      profit_may_be_left_in_account: true
+  one_step:     # source: one_step_guide, active_days
+    sizes_usd: [5000, 10000, 25000, 50000, 100000, 200000]
+    phases:
+      challenge:
+        profit_target_pct: 10
+        daily_loss_pct: 4
+        max_loss_pct: 6
+        max_loss_type: static
+        min_active_days: 3
+        time_limit_days: null     # "Maximum Trading Days: No"
+        consistency_rule: false
+        risk_per_trade_idea_pct: null
+    funded:
+      daily_loss_pct: 4
+      max_loss_pct: 6
+      max_loss_type: static
+      profit_split: 0.80
+      reward_cycle_days: 14       # 7 with paid add-on; on-demand add-on also sold
+      active_days_per_cycle: 3
+      min_reward_usd: 100
+      risk_per_trade_idea_pct: 1.5    # of INITIAL size, hard breach; losses re-entered within 10 min same direction/correlated count together
+      consistency_rule: false
+      inactivity_breach_days: 30
+    # A separate "Flex 1-Step" product exists (no min days, no weekend holding); not modelled.
+
+rewards:      # source: reward_freq
+  first: "14 days after the first trade on the Earnings (funded) Account"
+  subsequent: "14 days after approval of the previous reward request"
+
+scaling_plan: # source: scaling (evaluation-path accounts only, not Instant)
+  boost: 0.25                    # balance +25%
+  every_months: 3
+  requires: [">=10% net profit over 3 consecutive months", ">=4 payouts processed in that 3-month period"]
+  split_up_to: 0.90
+  max_total_usd: 2000000
+
+restrictions:   # source: prime_news, weekend, one_step_guide
+  news: "no NEW positions from 2 min before to 2 min after a scheduled high-impact release; closing/managing, SL/TP fills and partial closes are allowed"
+  news_applies_to: [evaluation, funded]   # 1-Step table: 'High Impact News Trading: No' in both phases
+  overnight: allowed
+  weekend: allowed               # all account types except Flex 1-Step
+  hedging: "same trading account only"   # one_step_guide
+
+# Source: symbols, leverage, commissions, lot_sizes.
+instruments:
+  NAS100:
+    listed: true                 # "NAS100 (NASDAQ)"; platform suffix .pi / .p
+    commission_per_lot: 0        # ASSUMED: commissions article lists USD 7/lot only for FX and XAU pairs
+  SP500:
+    listed: true                 # "SP500 (S&P 500)"
+    commission_per_lot: 0        # ASSUMED, as above
+  leverage_indices: 10           # leverage article: "Indices 1:10", "same across all plans"
+  lot_min_step: "per instrument; read MT5 Specification (SYMBOL_VOLUME_MIN/STEP)"   # lot_sizes
+
+open_questions:
+  - "Fees come from a 2026-06-30 archive capture (pre-17-Aug changes); the live site is bot-checked and later captures show only the bot page. Re-check current Prime / 1-Step prices by hand."
+  - "Index contract size (USD per point per 1.0 lot) for NAS100 / SP500, min lot and lot step, and typical spreads are NOT published in the help centre. Read SYMBOL_TRADE_CONTRACT_SIZE / VOLUME_MIN / VOLUME_STEP from the MT5 Specification on a Blueberry Funded account before sizing. Do not assume USD 1/point."
+  - "Index commission assumed 0: the commissions article only names FX and XAU pairs (USD 7/lot, charged on open and close per its wording). Confirm on the account."
+  - "Leverage conflict: prime_overview says '1:30 on all accounts' and the 1-Step table says 'Account Leverage 1:30', but the leverage article and the pricing table give Indices 1:10. We use 1:10 for indices."
+  - "Daily reset '5:00 PM EST': assumed to follow New York time (EST/EDT) like most MT5 servers; not stated explicitly."
+  - "Whether the daily floor is breached on EQUITY intraday (the 1-Step guide says 'your equity cannot fall below'), assumed yes; floating P/L at the reset raises the anchor via the higher-of rule."
+  - "Prime min active days per EVALUATION phase: changes_aug17 says 3 and the June pricing table says '3 or 5 Days / Phase'; the active_days article lists Prime only 'per reward cycle'. We apply 3 per phase and 3 per funded cycle."
+  - "Scaling plan split increase ('up to 90%', 'increases of up to 9%') is vague; not modelled beyond split_up_to."
+  - "Whether a 1-Step or Prime profit-target pass requires positions to be closed is not stated."

@@ -5,6 +5,7 @@ server. Everything shown comes from registry/runs/*.json and the trial registry.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 
 from propquant.catalogue import catalogue
@@ -18,6 +19,10 @@ TIERS = {"champion": 0, "elite": 1, "contender": 2, "graveyard": 3}
 
 
 def build() -> str:
+    from propquant import paths
+    from propquant.vault.sync import mirror
+
+    mirror(paths.vault_dir(), paths.DOCS_VAULT_DIR)  # evidence images are served from here
     cat = catalogue()  # also registers every strategy family (needed for REGISTRY below)
     runs = {}
     for f in sorted(RUNS_DIR.glob("*.json")):
@@ -69,6 +74,15 @@ def build() -> str:
         "runs": runs,
     }  # fmt: skip
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    # cache-bust the page's assets so a rebuilt dashboard is never shown with stale code
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    index = OUT.parent / "index.html"
+    html = re.sub(
+        r'(src|href)="(app\.js|data\.js|style\.css)(\?v=\d+)?"',
+        lambda m: f'{m.group(1)}="{m.group(2)}?v={stamp}"',
+        index.read_text(encoding="utf-8"),
+    )
+    index.write_text(html, encoding="utf-8")
     OUT.write_text("window.PQ = " + json.dumps(data, separators=(",", ":")) + ";\n",
                    encoding="utf-8")  # fmt: skip
     return str(OUT)

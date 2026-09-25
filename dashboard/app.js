@@ -163,7 +163,7 @@
     const hoPts = ho ? ho.dates.map((t, i) => ({ x: Date.parse(t), y: (oos.equity.at(-1) || 0) + ho.equity[i] })) : [];
     const plans = Object.keys(run.oos_challenge);
     const chRows = ["eval_pass", "eval_fail", "eval_expired", "median_sessions_to_pass", "first_payout_given_pass", "end_to_end_payout", "ev_per_attempt", "ev_p05", "starts"];
-    const fmt = (k, v) => (k.includes("ev") ? usd(v) : ["starts", "median_sessions_to_pass"].includes(k) ? num(v, 0) : pct(v));
+    const fmt = (k, v) => (k.startsWith("ev_") ? usd(v) : ["starts", "median_sessions_to_pass"].includes(k) ? num(v, 0) : pct(v));
     const chosen = new Set(run.folds.map((f) => JSON.stringify(f.params)));
     const finalKey = JSON.stringify(run.final_params);
     const gridSorted = [...run.grid].sort((a, b) => (b.dev_sharpe_ann ?? -99) - (a.dev_sharpe_ann ?? -99));

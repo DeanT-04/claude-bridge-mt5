@@ -1,65 +1,151 @@
-# FTMO: 2-Step (Challenge + Verification) and 1-Step Challenge rules.
+# FTMO (CFD): 2-Step (FTMO Challenge + Verification) and 1-Step Challenge, plus the FTMO Account.
 #
-# PARTIAL (work in progress): only the trading objectives page has been read so far.
-# Every rule below cites a source key. Anything not yet verified is in `open_questions`.
+# ftmo.com served these pages to plain HTTP requests on 2026-09-25 (no bot check), so the rules
+# were read from the LIVE pages that day (`fetched` in `sources`). Every rule cites a source key.
+# Fees are in EUR (FTMO prices in EUR for every account currency); EV should be computed at LIST
+# price, not the promo price. Re-verify before trusting results.
 firm: ftmo
 name: FTMO
 verified_on: 2026-09-25
-platform: mt5   # CFD firm; platform choice not yet verified for this file
+platform: mt5            # the firm's platforms: MT4, MT5, cTrader, DXtrade
 
 sources:
-  objectives: {url: "https://ftmo.com/en/trading-objectives/", fetched: "2026-09-25 (live page, via WebFetch summary)"}
+  objectives:  {url: "https://ftmo.com/en/trading-objectives/", fetched: "2026-09-25"}
+  two_step:    {url: "https://ftmo.com/en/2-step-challenge/", fetched: "2026-09-25", note: "embedded pricing JSON: `prices.step_2` / `prices.step_1`, ordered as the USD `challenges` balances 200K,100K,50K,25K,10K"}
+  one_step:    {url: "https://ftmo.com/en/1-step-challenge/", fetched: "2026-09-25"}
+  comparison:  {url: "https://ftmo.com/en/comparison-table/", fetched: "2026-09-25", note: "'Starts from EUR 89' (2-Step) / 'EUR 79' (1-Step) confirms the fee currency and the 10K price"}
+  refund:      {url: "https://ftmo.com/en/faq/is-the-entry-fee-refunded/", fetched: "2026-09-25"}
+  reward:      {url: "https://ftmo.com/en/faq/how-do-i-withdraw-my-profits/", fetched: "2026-09-25", note: "page title: 'How do I withdraw my reward?'"}
+  scaling:     {url: "https://ftmo.com/en/scaling-plan/", fetched: "2026-09-25"}
+  news:        {url: "https://ftmo.com/en/faq/can-i-trade-news/", fetched: "2026-09-25"}
+  weekend:     {url: "https://ftmo.com/en/faq/do-i-have-to-close-my-positions-overnight-or-before-the-weekend/", fetched: "2026-09-25"}
+  strategies:  {url: "https://ftmo.com/en/faq/which-instruments-can-i-trade-and-what-strategies-am-i-allowed-to-use/", fetched: "2026-09-25"}
+  symbols:     {url: "https://ftmo.com/wp-json/ftmo/symbols", fetched: "2026-09-25", note: "JSON feed loaded by https://ftmo.com/en/symbols/"}
 
 session:
-  day_reset: "00:00"            # objectives: "00:00 CE(S)T"
-  day_reset_tz: "Europe/Prague" # CE(S)T, i.e. CET/CEST with DST
-  trading_day_definition: "any day 00:00:00-23:59:59 CE(S)T in which at least one position is opened"  # objectives
+  day_reset: "00:00"              # objectives: limits "recalculated daily at 00:00 CE(S)T"
+  day_reset_tz: "Europe/Prague"   # CE(S)T = CET/CEST, follows EU daylight saving
+  trading_day: "a day 00:00:00-23:59:59 CE(S)T on which at least one position is OPENED"  # objectives
+
+# How the limits are computed (objectives, verbatim in substance):
+#  - Checked against EQUITY = balance + open-position P/L +/- swaps - commissions, in real time.
+#  - Daily floor = BALANCE recorded at 00:00 CE(S)T today - daily amount (% of INITIAL capital).
+#    Day 1 uses the initial capital. Floating P/L carried over midnight is NOT in the anchor.
+#  - 2-Step max loss: STATIC floor = initial capital - 10% of initial.
+#  - 1-Step max loss: END-OF-DAY TRAILING floor = max(highest 00:00 CE(S)T balance of any
+#    preceding day, initial capital) - 10% of initial. Only rises; no cap on how far it rises.
+#    Resets to 90% of initial when a Reward is withdrawn and a new FTMO Account is provided.
+#  - Profit target met when BALANCE >= initial + target "with all positions closed".
+limits:
+  equity_includes: [balance, open_pnl, swaps, commissions]
+  daily_anchor: balance_at_reset
+  daily_amount_base: initial_capital
+
+fees_eur:   # source: two_step (pricing JSON), comparison. List prices; promos exist (100K was 439 / 399).
+  two_step: {10K: 89, 25K: 250, 50K: 345, 100K: 540, 200K: 1080}
+  one_step: {10K: 79, 25K: 199, 50K: 319, 100K: 499, 200K: 999}
+
+refund:     # source: refund, two_step
+  two_step: "100% of the fee, with the first Reward withdrawal"
+  one_step: "not refunded"
 
 programmes:
-  two_step:   # source: objectives
+  two_step:   # source: objectives, comparison, two_step
+    account_types: [standard, swing]
+    sizes_usd: [10000, 25000, 50000, 100000, 200000]
     phases:
       challenge:
         profit_target_pct: 10
-        max_daily_loss_pct: 5        # of INITIAL capital
-        daily_loss_basis: "balance at 00:00 CE(S)T minus 5% of initial capital"
-        max_loss_pct: 10
-        max_loss_type: static        # floor = initial capital - 10% of initial
-        min_trading_days: 4
-        best_day_max_share: 0.5      # not a breach; must keep trading until satisfied
-      verification:
-        profit_target_pct: 5
-        max_daily_loss_pct: 5
-        daily_loss_basis: "balance at 00:00 CE(S)T minus 5% of initial capital"
+        daily_loss_pct: 5
         max_loss_pct: 10
         max_loss_type: static
         min_trading_days: 4
-        best_day_max_share: 0.5
-    funded:
-      profit_target_pct: null        # "No profit target" on FTMO Account
-      max_daily_loss_pct: 5
+        time_limit_days: null     # "Trading Period: Unlimited"
+        best_day_rule: false      # comparison: "Best Day Rule: -" for 2-Step
+      verification:
+        profit_target_pct: 5
+        daily_loss_pct: 5
+        max_loss_pct: 10
+        max_loss_type: static
+        min_trading_days: 4
+        time_limit_days: null
+        best_day_rule: false
+    funded:     # "FTMO Account (2-Step)"
+      profit_target_pct: null
+      daily_loss_pct: 5
       max_loss_pct: 10
       max_loss_type: static
       min_trading_days: 0
-  one_step:   # source: objectives
+      profit_split: 0.80          # reward: 80%, rises to 90% via Scaling Plan or Premium Programme
+      profit_split_max: 0.90
+      reward_rollover_allowed: true
+  one_step:   # source: objectives, comparison, one_step
+    account_types: [standard]
+    sizes_usd: [10000, 25000, 50000, 100000, 200000]
     phases:
       challenge:
         profit_target_pct: 10
-        max_daily_loss_pct: 3
-        daily_loss_basis: "balance at 00:00 CE(S)T minus 3% of initial capital"
+        daily_loss_pct: 3
         max_loss_pct: 10
-        max_loss_type: eod_trailing  # highest preceding EOD balance - 10% of initial; only ratchets up
-        min_trading_days: 0
-        best_day_max_share: 0.5
-    funded:
+        max_loss_type: eod_trailing
+        min_trading_days: 0       # comparison: "Min Trading Days: -"
+        time_limit_days: null
+        best_day_max_share: 0.5   # best day <= 50% of Positive Days' Profit (closed P/L); not a breach, keep trading
+    funded:     # "FTMO Account (1-Step)"
       profit_target_pct: null
-      max_daily_loss_pct: 3
+      daily_loss_pct: 3
       max_loss_pct: 10
       max_loss_type: eod_trailing
       min_trading_days: 0
+      best_day_max_share: 0.5     # required to be eligible for a Reward
+      profit_split: 0.90
+      reward_rollover_allowed: false
+
+rewards:    # source: reward
+  first_request: "on the 14th or any following day after the first trade on the account"
+  requires_flat: true             # all positions and pending orders closed
+  review_business_days: "1-2, then payment typically 1-2 business days after invoice approval"
+  min_amount_usd: {bank_wire: 20, crypto: 50}
+
+scaling_plan:   # source: scaling
+  boost: 0.25                     # +25% of FTMO Account balance
+  every_months: 4
+  requires: ["4 months as FTMO Trader (or since last scale-up)", ">=10% net profit over the prior 4 months", ">=2 processed Rewards in that period", "positive balance at scale-up"]
+  split_after: 0.90               # "valid for 2-Step only"
+  max_total_usd: 2000000
+
+restrictions:   # source: news, weekend, strategies
+  evaluation: "none for news, overnight or weekend holding (either account type)"
+  funded_standard:
+    news: "no opening/closing (incl. SL/TP fills) on targeted instruments from 2 minutes before to 2 minutes after restricted releases; positions opened >2 min before may be held"
+    weekend: "must close before the weekend close, or before a rollover break longer than 2 hours"
+  funded_swing: "no news, overnight or weekend restrictions"
+  server_limits: "200 open orders at a time, 2000 positions per day"
+
+# Source: symbols (JSON feed behind https://ftmo.com/en/symbols/). contract_size 1 with USD profit
+# currency => USD 1 per index point per 1.0 lot. Swaps are in points per lot per night.
+# Session in the feed for 2026-09-21..25: 22:05 -> 20:50 UTC (i.e. 18:05 -> 16:50 ET in EDT).
+instruments:
+  US100.cash:
+    name: "NASDAQ 100 Index, Spot CFD"
+    usd_per_point_per_lot: 1
+    digits: 2
+    leverage: {standard: 50, swing: 15}   # marginPercent 2
+    commission_per_lot: 0                 # commission 0 ("percent" type)
+    swap_points: {long: -689.33, short: 33.82}   # as of fetch date; changes daily
+    max_trade_volume: 1000
+  US500.cash:
+    name: "S&P 500 Index, Spot CFD"
+    usd_per_point_per_lot: 1
+    digits: 2
+    leverage: {standard: 50, swing: 15}
+    commission_per_lot: 0
+    swap_points: {long: -163.19, short: -2.58}
+    max_trade_volume: 1000
 
 open_questions:
-  - "Fees per account size, refund policy, account sizes: not yet verified."
-  - "Whether the daily-loss check includes floating P&L, commissions and swaps: not yet quoted verbatim."
-  - "Time limit per phase, news/weekend restrictions, profit split, payout timing, scaling plan: not yet verified."
-  - "US100/US500 contract specs, leverage, commission, spreads: not yet verified."
-  - "Whether the 1-Step max-loss trail stops at some level (e.g. initial balance): not yet verified."
+  - "Payout frequency AFTER the first Reward (FTMO has historically used a 14-day reward cycle, with on-demand/weekly options): the reward FAQ only states the first request date."
+  - "Fee-to-size mapping is inferred from array order in the pricing JSON (matches the 10K 'Starts from EUR 89/79' anchor). Fees are EUR; convert at the day's rate for USD EV."
+  - "Whether 1-Step allows Swing: comparison lists only 'Standard'."
+  - "US100.cash / US500.cash minimum lot and lot step are not in the symbols feed (MT5 index CFDs are commonly 0.01/0.01; check SYMBOL_VOLUME_MIN/STEP on the account). Typical spreads are not published."
+  - "Whether 'Initial Simulated Capital' for the 2-Step FTMO Account changes after a scale-up (limits presumably rescale with the new balance)."

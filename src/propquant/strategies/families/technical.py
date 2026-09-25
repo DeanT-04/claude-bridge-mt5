@@ -311,7 +311,8 @@ class IbTwapBreak(Strategy):
         tw = F.at_minute(md, session_twap(md), end - 1)
         px = F.at_minute(md, md.close, end - 1)
         side = np.sign(px - tw)  # known at the 10:30 close
-        live = window(md, end - 1, 840) & F.to_bars(md, np.isfinite(rng) & (side != 0))
+        ok = np.isfinite(rng) & np.isfinite(side) & (side != 0)  # no TWAP/price -> no trade
+        live = window(md, end - 1, 840) & F.to_bars(md, ok)
         o = Orders.empty(md.n)
         o.order_type[live] = core.STOP
         o.order_dir[live] = F.to_bars(md, side)[live].astype(np.int64)
