@@ -51,6 +51,9 @@ select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF"]
 # Strategy classes declare defaults/param_space as ClassVar in the base class.
 ignore = ["RUF012"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/propquant/vault/skeleton.py" = ["E501"]  # markdown tables
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

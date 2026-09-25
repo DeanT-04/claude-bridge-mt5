@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-ELITE, CONTENDER, GRAVEYARD = "elite", "contender", "graveyard"
+CHAMPION, ELITE, CONTENDER, GRAVEYARD = "champion", "elite", "contender", "graveyard"
 
 
 @dataclass
@@ -70,9 +70,13 @@ def checks(g: dict, *, oos_trades: int, dsr: float, re_pct: float, ch: dict,
     ]
 
 
-def decide(cs: list[Check], contender: dict, ch: dict) -> tuple[str, list[str]]:
+def decide(cs: list[Check], contender: dict, ch: dict,
+           champion: dict | None = None) -> tuple[str, list[str]]:  # fmt: skip
     failed = [c.name for c in cs if not c.passed]
     if not failed:
+        if champion and (ch["eval_pass"] >= champion["eval_pass"]
+                         and ch["end_to_end_payout"] >= champion["end_to_end_payout"]):  # fmt: skip
+            return CHAMPION, []
         return ELITE, []
     stats_ok = all(c.passed for c in cs if c.kind == "stat")
     commercial_ok = all(c.passed for c in cs if c.kind == "commercial")

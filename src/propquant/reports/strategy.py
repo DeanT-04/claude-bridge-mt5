@@ -169,7 +169,12 @@ def write(r: GauntletResult) -> str:
             for k in ("eval_pass", "end_to_end_payout", "ev_per_attempt", "starts")
         ])  # fmt: skip
         hold += f"\n\nHoldout daily mean P&L per micro: {np.mean(r.holdout_daily):.2f} USD"
-    folder = {"elite": "Strategies", "contender": "Strategies", "graveyard": "Graveyard"}
+    folder = {
+        "champion": "Strategies",
+        "elite": "Strategies",
+        "contender": "Strategies",
+        "graveyard": "Graveyard",
+    }
     reasons = "\n".join(f"- {f}" for f in r.failed) or "- none"
     body = f"""---
 type: strategy

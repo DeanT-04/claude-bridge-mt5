@@ -19,9 +19,17 @@ challenge_mc:
 
 random_entry: {runs: 1000, seed: 11}
 
-gates:                        # all measured out-of-sample
-  end_to_end_payout: 0.60
+# Protocol change 2026-09-25 (before any real strategy was tested): the synthetic calibration
+# showed that an 85% eval pass needs an annualised Sharpe of about 8 under Apex's 30-day window
+# (vault: Lessons/85 percent pass needs an extreme edge). The user asked for the highest
+# first-time completion rate, so the 85% bar becomes the CHAMPION tier (the goal for P7
+# portfolios) and Elite is the bar for a single strategy. Ranking uses end-to-end payout.
+champion:
   eval_pass: 0.85
+  end_to_end_payout: 0.80
+gates:                        # Elite; all measured out-of-sample
+  end_to_end_payout: 0.50
+  eval_pass: 0.60
   first_payout_given_pass: 0.70
   median_sessions_to_pass: 15
   p90_sessions_to_pass: 30
@@ -30,6 +38,6 @@ gates:                        # all measured out-of-sample
   random_entry_percentile: 0.95
   min_oos_trades: 200
   holdout: {min_pass_rate_drop: 0.15, min_daily_mean: 0.0}
-contender:                    # stats gates all pass; commercial gates narrowly missed
-  end_to_end_payout: 0.45
-  eval_pass: 0.70
+contender:                    # stats gates all pass; commercial gates missed but in reach
+  end_to_end_payout: 0.35
+  eval_pass: 0.45

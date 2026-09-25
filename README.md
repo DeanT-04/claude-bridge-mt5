@@ -13,7 +13,7 @@ The previous MT5 project is archived on the `archive/mt5-bridge` branch.
 | Phase | Scope | State |
 |---|---|---|
 | P0 | Scaffold, vault skeleton and sync | ✅ done |
-| P1 | Data: Dukascopy proxy bars, yfinance futures, tracking report | ✅ NQ done; ES downloading |
+| P1 | Data: Dukascopy proxy bars, yfinance futures, tracking report | ✅ done (NQ + ES) |
 | P2 | Apex rules, verified and tested | ✅ done |
 | P3 | numba backtest engine plus anti-cheating tests | ✅ done |
 | P4 | Gauntlet, challenge Monte Carlo, visual reports | ✅ done |
@@ -21,8 +21,16 @@ The previous MT5 project is archived on the `archive/mt5-bridge` branch.
 | P6 | Strategy factory | — |
 | P7 | Portfolios, then FTMO and Blueberry | — |
 
-## Promotion gates
-All gates are measured out-of-sample, across at least 1,000 challenge simulations that each start on a random date. The headline gate is an **end-to-end payout rate of at least 60%**: one purchased evaluation leading to at least one payout. The other gates: evaluation pass rate ≥ 85%, first payout once funded ≥ 70%, median days to pass ≤ 15, expected profit after fees above zero even at the 5th percentile, Deflated Sharpe > 0.95, beating 95% of random-entry runs, and a holdout result that doesn't contradict the rest. The details are in `docs/PLAN.md`.
+## Promotion tiers
+Strategies are ranked by **end-to-end payout rate**: the chance that one purchased evaluation passes and then reaches a payout. Everything is measured out-of-sample, across challenge simulations that each start on a different session.
+
+| Tier | Requirements |
+|---|---|
+| **Champion** | Elite, plus evaluation pass ≥ 85% and end-to-end payout ≥ 80%. This is the goal for portfolios (P7). |
+| **Elite** | Evaluation pass ≥ 60%, end-to-end payout ≥ 50%, first payout once funded ≥ 70%, median ≤ 15 sessions to pass, expected profit per attempt above zero at the 5th percentile, Deflated Sharpe > 0.95, beats 95% of random-entry runs, holdout consistent. |
+| **Contender** | All statistical gates pass, with end-to-end payout ≥ 35% and evaluation pass ≥ 45%. |
+
+The tiers were set after the synthetic calibration and before any real strategy was tested: an 85% pass rate needs an annualised Sharpe of about 8 under Apex's 30-day window. Full details are in `config/research.yaml`.
 
 ## Findings so far
 - **Free data works.** Dukascopy's keyless chart feed has 1-minute NASDAQ-100 and S&P 500 CFD bid/ask bars from 2012-01-19. It trades 18:00–16:15 ET, so it has no bars 16:15–17:00 ET. Yahoo supplies real CME futures bars for comparison: 1m for 8 days, 5m for 60 days, 1h for about 2 years.

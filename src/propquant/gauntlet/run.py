@@ -211,7 +211,9 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             sizes = np.concatenate([np.full(f.test_sessions[1] - f.test_sessions[0],
                                             f.sizes[plan]) for f in folds])  # fmt: skip
             oos_ch[plan], mc_out[plan] = _mc(oos_pnl, sizes, spec, cfg)
-        best_plan = max(oos_ch, key=lambda p: oos_ch[p]["ev_per_attempt"])
+        # rank plans by the chance of completing every stage; EV breaks ties
+        best_plan = max(oos_ch, key=lambda p: (oos_ch[p]["end_to_end_payout"],
+                                               oos_ch[p]["ev_per_attempt"]))  # fmt: skip
 
         # ---- 4. statistics: random entry + deflated Sharpe
         re_cfg = cfg["random_entry"]
@@ -264,7 +266,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         # ---- 6. verdict
         cs = verdict.checks(cfg["gates"], oos_trades=len(oos_trades), dsr=dsr, re_pct=re_pct,
                             ch=oos_ch[best_plan], holdout_ok=holdout_ok)  # fmt: skip
-        v, failed = verdict.decide(cs, cfg["contender"], oos_ch[best_plan])
+        v, failed = verdict.decide(cs, cfg["contender"], oos_ch[best_plan], cfg.get("champion"))
         res = GauntletResult(
             strategy=name, family=cls.family, run_id=run_id, data_hash=md_dev.data_hash,
             commit=reg.commit, seed=seed, grid=grid, grid_dev_sharpe=dev_sharpe, folds=folds,

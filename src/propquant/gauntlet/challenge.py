@@ -92,23 +92,26 @@ def choose_size(pnl: dict, spec: ChallengeSpec, runway: int, max_micros: int,
                 gates: dict | None = None) -> tuple[int, float]:  # fmt: skip
     """Size (micros) chosen on THIS data (training only).
 
-    The most profitable size (mean value per attempt) among those meeting the commercial
-    and speed gates; if no size meets them, the most profitable size overall.
+    Goal: the highest chance of completing every stage (end-to-end payout rate) among sizes
+    with positive expected profit per attempt; expected profit breaks ties. If no size is
+    profitable, the least-bad size by expected profit. ``gates`` is kept for callers but the
+    objective no longer depends on it.
     """
     starts = start_sessions(len(pnl["sess_start"]) - 1, runway)
     if len(starts) == 0:
         return 1, 0.0
-    best, best_v, ok_best, ok_v = 1, -np.inf, None, -np.inf
+    best, best_key, fallback, fallback_v = None, (-np.inf, -np.inf), 1, -np.inf
     for size in SIZE_GRID:
         if size > max_micros:
             break
         out = sim.run_many(pnl, starts, size, spec)
         v = float(attempt_value(out, spec).mean())
-        if v > best_v:
-            best, best_v = size, v
-        if gates and _meets(out, gates) and v > ok_v:
-            ok_best, ok_v = size, v
-    return (ok_best, ok_v) if ok_best is not None else (best, best_v)
+        e2e = float(((out[:, 0] == sim.PASS) & (out[:, 4] >= 1)).mean())
+        if v > fallback_v:
+            fallback, fallback_v = size, v
+        if v > 0 and (e2e, v) > best_key:
+            best, best_key = size, (e2e, v)
+    return (best, best_key[1]) if best is not None else (fallback, fallback_v)
 
 
 def _meets(out: np.ndarray, g: dict) -> bool:
