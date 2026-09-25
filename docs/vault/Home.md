@@ -22,7 +22,16 @@ Why the tiers look like this: [[85 percent pass needs an extreme edge]].
 
 ## Leaderboard
 <!-- AUTO:leaderboard:start -->
-_No strategies tested yet._
+| # | Strategy | Tier | Plan | Reach payout | Eval pass | EV/attempt | DSR | Beats random |
+|---|---|---|---|---|---|---|---|---|
+| 1 | [[late_trend]] | graveyard | eod | 5% | 21% | $-190 | 0.21 | 100% |
+| 2 | [[gap_fade]] | graveyard | eod | 4% | 28% | $-462 | 0.01 | 94% |
+| 3 | [[orb]] | graveyard | eod | 4% | 24% | $-344 | 0.14 | 100% |
+| 4 | [[ib_breakout]] | graveyard | intraday | 2% | 13% | $-82 | 0.03 | 98% |
+| 5 | [[control_random]] | graveyard | intraday | 1% | 11% | $-243 | 0.00 | 47% |
+| 6 | [[intraday_momentum]] | graveyard | intraday | 0% | 1% | $-249 | 0.00 | 43% |
+
+_6 strategies. Ranked by tier, then by reach-payout rate._
 <!-- AUTO:leaderboard:end -->
 
 ## Map

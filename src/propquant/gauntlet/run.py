@@ -23,6 +23,7 @@ from propquant.gauntlet import challenge as ch
 from propquant.gauntlet import config, random_entry, stats, verdict
 from propquant.strategies.base import Strategy, get
 from propquant.trials import Registry
+from propquant.vault import ideas
 
 MIN_TRAIN_TRADES = 50
 
@@ -148,6 +149,9 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         progress=print) -> GauntletResult:  # fmt: skip
     cfg = cfg or config.load()
     cls = get(name)
+    idea_hash = ""
+    if cls.needs_idea_note:
+        idea_hash = ideas.require(name)  # no pre-registered hypothesis -> no test
     own_registry = registry is None
     reg = registry or Registry()
     run_id = uuid.uuid4().hex[:10]
@@ -172,7 +176,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         progress(f"{name}: sweeping {len(grid)} configs on {len(md_dev.sess_day)} dev sessions")
         daily, n_trades_by_sess, dev_sharpe = [], [], []
         for p in grid:
-            r = backtest.run(md_dev, cls(**p).orders(md_dev), costs)
+            r = cls(**p).backtest(md_dev, costs)
             d = r.daily_pnl()
             daily.append(d)
             cnt = np.zeros(len(md_dev.sess_day))
@@ -195,7 +199,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             f = Fold(y, (0, a), (a, b), grid[k], float(scores[k]))
             key = json.dumps(grid[k], sort_keys=True)
             if key not in cache:
-                cache[key] = backtest.run(md_dev, cls(**grid[k]).orders(md_dev), costs)
+                cache[key] = cls(**grid[k]).backtest(md_dev, costs)
             train = ch.slice_pnl(cache[key].sim_input(), 0, a)
             for plan, spec in plans.items():
                 f.sizes[plan], _ = ch.choose_size(train, spec, runway, max_micros, cfg["gates"])
@@ -237,7 +241,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
         final = grid[int(np.argmax(dev_scores))]
         key = json.dumps(final, sort_keys=True)
         if key not in cache:
-            cache[key] = backtest.run(md_dev, cls(**final).orders(md_dev), costs)
+            cache[key] = cls(**final).backtest(md_dev, costs)
         dev_pnl = cache[key].sim_input()
         final_sizes = {p: ch.choose_size(dev_pnl, s, runway, max_micros, cfg["gates"])[0]
                        for p, s in plans.items()}  # fmt: skip
@@ -247,7 +251,7 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             note = f"holdout already used {uses}x for these params: not re-run"
         else:
             reg.log_holdout(run_id, name, final, forced=bool(uses))
-            full = backtest.run(md_full, cls(**final).orders(md_full), costs)
+            full = cls(**final).backtest(md_full, costs)
             h_pnl = ch.slice_pnl(full.sim_input(), dev_end, len(md_full.sess_day))
             h_daily = np.add.reduceat(h_pnl["d_close"], h_pnl["sess_start"][:-1])
             h_days = h_pnl["sess_day"]
@@ -277,7 +281,8 @@ def run(name: str, symbol: str = "NQ", md_full: MarketData | None = None, cfg: d
             holdout_daily=h_daily, holdout_note=note, checks=cs, verdict=v, failed=failed,
             mc_paths={"out": mc_out[best_plan], "pnl": oos_pnl},
         )  # fmt: skip
-        reg.log_run(run_id, name, v, res.summary(), md_dev.data_hash, seed)
+        reg.log_run(run_id, name, v, res.summary() | {"idea_hash": idea_hash}, md_dev.data_hash,
+                    seed)  # fmt: skip
         return res
     finally:
         if own_registry:

@@ -93,6 +93,7 @@ class Orders:
     sl_pts: np.ndarray
     tp_pts: np.ndarray
     exit_sig: np.ndarray
+    order_px2: np.ndarray  # sell-stop leg of an OCO bracket (order_dir 0)
 
     @classmethod
     def empty(cls, n: int) -> "Orders":
@@ -100,6 +101,7 @@ class Orders:
             order_type=np.zeros(n, np.int64),
             order_dir=np.zeros(n, np.int64),
             order_px=np.full(n, np.nan),
+            order_px2=np.full(n, np.nan),
             sl_pts=np.full(n, np.nan),
             tp_pts=np.full(n, np.nan),
             exit_sig=np.zeros(n, np.bool_),
@@ -150,11 +152,13 @@ class Result:
         )
 
 
-def run(md: MarketData, orders: Orders, costs: Costs, flat_minute: int = DEFAULT_FLAT_MINUTE):
+def run(md: MarketData, orders: Orders, costs: Costs, flat_minute: int = DEFAULT_FLAT_MINUTE,
+        max_per_session: int = 1_000_000):  # fmt: skip
     d_close, d_low, d_high, trades = core.run(
         md.open, md.high, md.low, md.close, md.minute, md.sess,
-        orders.order_type, orders.order_dir, orders.order_px, orders.sl_pts, orders.tp_pts,
+        orders.order_type, orders.order_dir, orders.order_px, orders.order_px2, orders.sl_pts,
+        orders.tp_pts,
         orders.exit_sig, flat_minute, costs.tick, costs.point_value, costs.slip_ticks,
-        costs.commission_side,
+        costs.commission_side, max_per_session,
     )  # fmt: skip
     return Result(d_close, d_low, d_high, trades, md)

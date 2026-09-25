@@ -138,3 +138,24 @@ def test_bar_extremes_bound_close_and_sim_invariants() -> None:
     assert (r.d_low <= np.minimum(r.d_close, 0) + 1e-12).all()
     assert (r.d_high >= np.maximum(r.d_close, 0) - 1e-12).all()
     assert r.d_close.sum() == pytest.approx(r.trades[:, 5].sum())
+
+
+def test_oco_bracket_takes_the_side_that_triggers() -> None:
+    bars = [(100, 101, 99, 100), (100, 100.5, 97, 97.5), *FLAT]
+    md = md_from(bars)
+    o = Orders.empty(md.n)
+    o.order_type[0], o.order_dir[0], o.order_px[0], o.order_px2[0] = core.STOP, 0, 102, 98
+    t = run(md, o, COSTS).trades_frame().row(0, named=True)
+    assert t["dir"] == -1 and t["entry_px"] == 98 - SLIP
+
+
+def test_oco_both_touched_picks_side_nearer_open_then_checks_stop() -> None:
+    # open 101.5: buy stop 102 is 0.5 away, sell stop 98 is 3.5 away -> long first,
+    # then the low of 97 hits the long's 3-point stop in the same bar
+    bars = [(100, 101, 99, 100), (101.5, 103, 97, 99), *FLAT]
+    md = md_from(bars)
+    o = Orders.empty(md.n)
+    o.order_type[0], o.order_dir[0], o.order_px[0], o.order_px2[0] = core.STOP, 0, 102, 98
+    o.sl_pts[0] = 3
+    t = run(md, o, COSTS).trades_frame().row(0, named=True)
+    assert t["dir"] == 1 and t["reason"] == core.EXIT_SL

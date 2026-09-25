@@ -1,0 +1,58 @@
+# Autonomous research sources. Everything here is keyless and polite (rate-limited).
+# Collected text stays in data/research (gitignored); only OUR summaries go in the vault.
+youtube:
+  per_query: 12
+  min_seconds: 240
+  max_seconds: 4200
+  min_views: 2000
+  pause_seconds: 3
+  daily_cap: 80
+  queries:
+    - NQ opening range breakout strategy backtest
+    - ES futures day trading strategy rules backtested
+    - nasdaq futures scalping strategy with statistics
+    - VWAP mean reversion futures strategy
+    - initial balance breakout strategy futures
+    - overnight gap fill strategy S&P futures backtest
+    - trend day identification futures strategy
+    - opening drive strategy index futures
+    - volume profile value area strategy futures rules
+    - market profile day types trading strategy
+    - quantitative intraday strategy S&P 500 futures
+    - prop firm challenge strategy futures pass rate
+    - Apex trader funding strategy that passes evaluation
+    - mechanical futures trading system backtest results
+    - time of day edge nasdaq futures
+    - first hour momentum strategy stock index futures
+papers:
+  arxiv:
+    max_results: 40
+    queries:
+      - 'cat:q-fin.TR AND abs:intraday'
+      - 'cat:q-fin.TR AND abs:futures AND abs:momentum'
+      - 'cat:q-fin.ST AND abs:intraday AND abs:return'
+      - 'abs:"intraday momentum"'
+      - 'abs:"opening range"'
+      - 'abs:"overnight returns" AND abs:"intraday"'
+  openalex:
+    per_page: 25
+    queries:
+      - intraday momentum stock index futures
+      - market intraday momentum last half hour
+      - overnight intraday return reversal futures
+      - opening range breakout profitability
+      - time of day effects equity index futures returns
+      - volatility regime intraday trading strategy
+sites:
+  pause_seconds: 3
+  keywords: [strateg, backtest, trading-rules, day-trading, futures, intraday, opening,
+             gap, momentum, mean-reversion, breakout, vwap, seasonal, overnight,
+             s-p-500, nasdaq, e-mini]
+  oxfordstrat:
+    sitemap: https://oxfordstrat.com/post-sitemap.xml
+  quantifiedstrategies:
+    # The live site answers bots with a JS "Bot Verification" page. We do not bypass it;
+    # articles are read from public Internet Archive captures instead.
+    via: wayback
+    domain: quantifiedstrategies.com
+    max_articles: 300

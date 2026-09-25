@@ -15,6 +15,7 @@ from propquant.strategies.base import Strategy
 class RandomControl(Strategy):
     name = "control_random"
     family = "control"
+    needs_idea_note = False
     defaults = {"seed": 0, "p_entry": 0.004, "sl_pts": 20.0, "tp_pts": 20.0,
                 "rth_only": True}  # fmt: skip
     param_space = {"seed": list(range(5))}

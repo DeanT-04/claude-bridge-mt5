@@ -1,5 +1,7 @@
 """Command-line entry point: `uv run propquant --help`."""
 
+import sys
+
 import typer
 from rich.console import Console
 
@@ -10,6 +12,10 @@ from propquant.vault.sync import mirror
 app = typer.Typer(no_args_is_help=True, help="Prop Quant Lab research pipeline.")
 vault_app = typer.Typer(no_args_is_help=True, help="Obsidian knowledge base.")
 app.add_typer(vault_app, name="vault")
+# Windows consoles default to cp1252; research titles contain emoji and other symbols.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 console = Console()
 
 
@@ -143,3 +149,59 @@ def gauntlet_run(
         console.print(f"  {r['result']:>4}  {r['gate']:<34} {r['value']:>10.3f}  {r['needs']}")
     console.print(f"[bold]{strategy}: {res.verdict.upper()}[/bold]  (run {res.run_id})")
     console.print(report.write(res))
+    from propquant.vault import leaderboard
+
+    leaderboard.update()
+
+
+@vault_app.command("leaderboard")
+def vault_leaderboard() -> None:
+    """Rebuild the Home.md leaderboard from the trial registry."""
+    from propquant.vault import leaderboard
+
+    leaderboard.update()
+
+
+research_app = typer.Typer(no_args_is_help=True, help="Autonomous research ingestion.")
+app.add_typer(research_app, name="research")
+
+
+@research_app.command("collect")
+def research_collect(
+    source: str = typer.Option("all", help="youtube | papers | sites | all"),
+    limit: int = typer.Option(40, help="Max new items per source"),
+) -> None:
+    """Discover and store new videos/papers/articles (no URLs needed)."""
+    from propquant.research import papers, sites, youtube
+    from propquant.research.inbox import Inbox
+
+    inbox = Inbox()
+    try:
+        runs = {
+            "youtube": lambda: youtube.collect(inbox, limit, console.print),
+            "papers": lambda: papers.collect(inbox, console.print),
+            "sites": lambda: sites.collect(inbox, console.print, limit),
+        }
+        for name, fn in runs.items():
+            if source in (name, "all"):
+                console.print(f"[bold]{name}[/bold]")
+                console.print(f"{name}: +{fn()} new")
+        for row in inbox.counts():
+            console.print(f"  {row[0]:<22} {row[1]:<11} {row[2]}")
+    finally:
+        inbox.close()
+
+
+@research_app.command("inbox")
+def research_inbox(
+    status: str = typer.Option("new"), kind: str = typer.Option(None), limit: int = 30
+) -> None:
+    """List inbox items."""
+    from propquant.research.inbox import Inbox
+
+    inbox = Inbox()
+    try:
+        for r in inbox.listing(status, kind, limit):
+            console.print(f"{r[0]:<48} {r[4]:>7,} chars  {r[3][:70]}")
+    finally:
+        inbox.close()

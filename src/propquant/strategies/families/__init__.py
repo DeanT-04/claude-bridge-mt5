@@ -1,3 +1,3 @@
 """Importing this package registers every strategy family."""
 
-from propquant.strategies.families import controls  # noqa: F401
+from propquant.strategies.families import controls, intraday  # noqa: F401

@@ -21,6 +21,8 @@ class Strategy(ABC):
     idea: ClassVar[str] = ""  # vault note (Ideas/...) holding the pre-registered hypothesis
     param_space: ClassVar[dict[str, list]] = {}
     defaults: ClassVar[dict] = {}
+    max_trades_per_session: ClassVar[int] = 1_000_000
+    needs_idea_note: ClassVar[bool] = True  # pre-registration is enforced by the gauntlet
 
     def __init__(self, **params) -> None:
         unknown = set(params) - set(self.defaults)
@@ -35,6 +37,11 @@ class Strategy(ABC):
 
     @abstractmethod
     def orders(self, md: MarketData) -> Orders: ...
+
+    def backtest(self, md: MarketData, costs):
+        from propquant.engine import backtest
+
+        return backtest.run(md, self.orders(md), costs, max_per_session=self.max_trades_per_session)
 
     def __repr__(self) -> str:
         return f"{self.name}({self.params})"

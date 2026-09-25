@@ -23,6 +23,7 @@ RTH = np.arange(9 * 60 + 30, 16 * 60, dtype=np.int64)  # 390 one-minute bars
 class PlantedHour(Strategy):
     name = "test_planted_hour"
     family = "test"
+    needs_idea_note = False
     defaults = {"entry_minute": 599, "hold": 60}
     param_space = {"entry_minute": [599, 629], "hold": [30, 60]}
 

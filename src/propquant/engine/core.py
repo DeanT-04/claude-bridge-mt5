@@ -6,6 +6,9 @@ of bar i and can only fill from bar i+1 onward.
 Pessimistic fill model:
   market   fills at the next bar's open, `slip` ticks adverse
   stop     fills at max(stop, open) for buys (gap-through = worse), `slip` ticks adverse
+  OCO      order_dir 0 + STOP: buy stop at order_px, sell stop at order_px2; if both are
+           touched in one bar the side nearer the open is assumed first (then its stop is
+           checked inside the same bar)
   limit    fills only if price trades THROUGH the limit (strictly), at the limit (or a better
            open), no slippage
   SL / TP  if both could be hit inside one bar, the stop wins. On the entry bar only the stop
@@ -26,8 +29,9 @@ EXIT_SL, EXIT_TP, EXIT_SIGNAL, EXIT_FLAT = 1, 2, 3, 4
 
 
 @njit(cache=True)
-def run(open_, high, low, close, minute, sess, order_type, order_dir, order_px, sl_pts, tp_pts,
-        exit_sig, flat_minute, tick, point_value, slip_ticks, commission_side):  # fmt: skip
+def run(open_, high, low, close, minute, sess, order_type, order_dir, order_px, order_px2, sl_pts,
+        tp_pts, exit_sig, flat_minute, tick, point_value, slip_ticks, commission_side,
+        max_per_session):  # fmt: skip
     n = len(open_)
     d_close = np.zeros(n)
     d_low = np.zeros(n)
@@ -39,18 +43,35 @@ def run(open_, high, low, close, minute, sess, order_type, order_dir, order_px, 
 
     pos, entry_px, sl, tp, entry_i = 0, 0.0, np.nan, np.nan, -1
     mark = 0.0  # price the open position was last marked at
+    entries = 0  # entries so far in the current session
     for i in range(1, n):
         new_session = sess[i] != sess[i - 1]
+        if new_session:
+            entries = 0
         eq_lo, eq_hi, eq_cl = 0.0, 0.0, 0.0  # relative to the previous bar close (USD/micro)
 
         # ---- 1. new entry from the order decided at bar i-1 ----
         entered = False
         j = i - 1
-        if pos == 0 and order_type[j] != NONE and not new_session and minute[i] < flat_minute:
+        if (pos == 0 and order_type[j] != NONE and not new_session and minute[i] < flat_minute
+                and entries < max_per_session):  # fmt: skip
             d = order_dir[j]
             fill = np.nan
             if order_type[j] == MARKET:
                 fill = open_[i] + d * slip
+            elif order_type[j] == STOP and d == 0:
+                # OCO bracket: buy stop at order_px, sell stop at order_px2
+                up, dn = order_px[j], order_px2[j]
+                hit_up, hit_dn = high[i] >= up, low[i] <= dn
+                if hit_up and hit_dn:  # both touched: the side nearer the open went first
+                    if up - open_[i] <= open_[i] - dn:
+                        hit_dn = False
+                    else:
+                        hit_up = False
+                if hit_up:
+                    d, fill = 1, max(up, open_[i]) + slip
+                elif hit_dn:
+                    d, fill = -1, min(dn, open_[i]) - slip
             elif order_type[j] == STOP:
                 px = order_px[j]
                 if d == 1 and high[i] >= px:
@@ -64,6 +85,7 @@ def run(open_, high, low, close, minute, sess, order_type, order_dir, order_px, 
                 elif d == -1 and high[i] > px:
                     fill = max(px, open_[i])
             if not np.isnan(fill):
+                entries += 1
                 pos, entry_px, entry_i, entered = d, fill, i, True
                 sl = fill - d * sl_pts[j] if not np.isnan(sl_pts[j]) else np.nan
                 tp = fill + d * tp_pts[j] if not np.isnan(tp_pts[j]) else np.nan

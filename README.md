@@ -17,8 +17,8 @@ The previous MT5 project is archived on the `archive/mt5-bridge` branch.
 | P2 | Apex rules, verified and tested | ✅ done |
 | P3 | numba backtest engine plus anti-cheating tests | ✅ done |
 | P4 | Gauntlet, challenge Monte Carlo, visual reports | ✅ done |
-| P5 | Autonomous research ingestion | next |
-| P6 | Strategy factory | — |
+| P5 | Autonomous research ingestion | ✅ done (YouTube, arXiv, OpenAlex, Oxford Strat, Quantified Strategies via archive) |
+| P6 | Strategy factory | 🔄 batch 1 tested (5 families, all Graveyard) |
 | P7 | Portfolios, then FTMO and Blueberry | — |
 
 ## Promotion tiers
@@ -51,6 +51,13 @@ The tiers were set after the synthetic calibration and before any real strategy 
 - **Calibration against Apex's rules** (see the vault lesson *85 percent pass needs an extreme edge*):
   - An 85% evaluation pass rate needs an annualised Sharpe of about 8 or more, because the 30-day window is the rule that binds.
   - Expected profit per attempt turns positive at a Sharpe of about 2.
+- **Batch 1 results** (NQ, walk-forward 2019–2025):
+  - Opening-range breakout, initial-balance breakout and late-day trend all show **real timing**, beating 98–99.9% of random-entry runs.
+  - None is strong enough on its own: Deflated Sharpe ≤ 0.21, and at most 5% of attempts reach a payout.
+  - Published intraday momentum shows nothing on NQ.
+  - Opening-range breakout and initial-balance breakout are 0.98 correlated, effectively the same strategy, and stacking the families barely raises the Sharpe.
+  - Details are in the vault lesson on batch 1.
+- **Pre-registration is enforced:** the gauntlet won't test a strategy without its `Ideas/` note, and each run records the note's hash.
 - **Apex's rules are verified** from Internet Archive captures of Apex's own help pages (the live site blocks bots). Both plan types, EOD and Intraday trailing, are encoded in `config/firms/apex.yaml`. Each rule cites its source, and every unresolved question is listed in that file. 50K list prices: EOD evaluation $550 plus $139 activation; Intraday evaluation $249 plus $59 activation.
 - **The challenge simulator** (`propquant.firms.sim`) runs the evaluation, then the funded account, then payouts. It covers trailing type and lock level, the daily loss limit, the 30-day access window, PA scaling tiers, the 5 qualifying days, 50% consistency, the safety net and the payout caps. Where a bar is ambiguous it assumes the worst case, and each rule has a boundary test.
 
@@ -68,6 +75,8 @@ uv run propquant data collect --symbol NQ   # real futures bars from Yahoo (run 
 uv run propquant data tracking --symbol NQ  # proxy-vs-futures fidelity report + charts
 uv run propquant firms note apex            # write verified firm rules into the vault
 uv run propquant gauntlet run control_random  # full gauntlet + evidence note in the vault
+uv run propquant research collect             # autonomous: YouTube, papers, strategy sites
+uv run propquant research inbox               # list new research items
 ```
 
 Environment overrides: `PROPQUANT_VAULT` (vault path), `PROPQUANT_DATA` (data directory; default `data/`, gitignored).

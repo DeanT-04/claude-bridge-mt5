@@ -54,6 +54,10 @@ def random_orders(md: MarketData, seed: int) -> Orders:
     o.order_dir[fire] = np.where(rng.random(md.n) < 0.5, 1, -1)[fire]
     off = rng.uniform(-6, 6, md.n)
     o.order_px[fire] = (md.close + off)[fire]
+    oco = fire & (rng.random(md.n) < 0.3) & (o.order_type == core.STOP)
+    o.order_dir[oco] = 0
+    o.order_px[oco] = (md.close + 4)[oco]
+    o.order_px2[oco] = (md.close - 4)[oco]
     o.sl_pts[fire] = rng.uniform(2, 30, md.n)[fire]
     o.tp_pts[fire] = rng.uniform(2, 30, md.n)[fire]
     o.exit_sig[:] = rng.random(md.n) < 0.01
@@ -84,17 +88,26 @@ def test_order_kinds_are_exercised() -> None:
     assert {core.EXIT_SL, core.EXIT_TP, core.EXIT_SIGNAL, core.EXIT_FLAT} <= reasons
 
 
-get("control_random")  # populate the registry
+get("control_random")  # populate the registry (imports every family)
 
 
 @pytest.mark.parametrize("name", sorted(REGISTRY))
 @pytest.mark.parametrize("seed", [3, 17])
 def test_strategy_orders_are_causal(name: str, seed: int) -> None:
-    md = synthetic_md(seed)
+    md = synthetic_md(seed, sessions=25)
     strat = REGISTRY[name]()
     a = strat.orders(md)
+    assert (a.order_type != 0).any(), f"{name} placed no orders: causality test would be vacuous"
     for frac in (0.2, 0.5, 0.8):
         t = int(frac * md.n)
         b = strat.orders(mutate_after(md, t, seed))
-        for f in ("order_type", "order_dir", "order_px", "sl_pts", "tp_pts", "exit_sig"):
+        for f in (
+            "order_type",
+            "order_dir",
+            "order_px",
+            "order_px2",
+            "sl_pts",
+            "tp_pts",
+            "exit_sig",
+        ):
             np.testing.assert_array_equal(getattr(a, f)[: t + 1], getattr(b, f)[: t + 1], f)
