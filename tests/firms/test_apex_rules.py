@@ -33,9 +33,13 @@ def bar(close: float, low: float | None = None, high: float | None = None):
     )
 
 
+def sizes(p: dict, size: int) -> np.ndarray:
+    return np.full(len(p["sess_start"]) - 1, size, dtype=np.int64)
+
+
 def run_eval(p: dict, spec=EOD, size: int = 1, s0: int = 0):
     return sim.sim_eval(
-        p["d_close"], p["d_low"], p["d_high"], p["sess_start"], p["sess_day"], s0, size,
+        p["d_close"], p["d_low"], p["d_high"], p["sess_start"], p["sess_day"], s0, sizes(p, size),
         spec.balance, spec.target, spec.drawdown, spec.eval_dll, spec.eval_max_micros,
         spec.eval_trail, spec.eval_trail_cap, spec.access_days,
     )  # fmt: skip
@@ -44,7 +48,7 @@ def run_eval(p: dict, spec=EOD, size: int = 1, s0: int = 0):
 def run_pa(p: dict, spec=EOD, size: int = 1, s1: int = 0):
     tf, tm, td = spec.tiers()
     return sim.sim_pa(
-        p["d_close"], p["d_low"], p["d_high"], p["sess_start"], s1, size, spec.balance,
+        p["d_close"], p["d_low"], p["d_high"], p["sess_start"], s1, sizes(p, size), spec.balance,
         spec.drawdown, spec.pa_trail, spec.pa_trail_cap, tf, tm, td, spec.min_daily_profit,
         spec.payout_min_days, spec.payout_consistency, spec.payout_min_amount,
         np.asarray(spec.payout_caps, dtype=np.float64), spec.safety_net,
@@ -215,3 +219,27 @@ def test_run_many_end_to_end() -> None:
     res = sim.run_many(p, np.array([0, 10, 20]), 1, EOD)
     assert (res[:, 0] == sim.PASS).all() and (res[:, 3] == sim.MAXED).all()
     assert INTRA.eval_trail == TRAIL_INTRADAY
+
+
+def test_run_many_accepts_per_session_sizes() -> None:
+    p = pnl([[bar(100)] for _ in range(40)])
+    per = np.r_[np.full(20, 10), np.full(20, 30)].astype(np.int64)  # fold 1: 10, fold 2: 30
+    res = sim.run_many(p, np.array([0, 20]), per, EOD)
+    assert res[0, 1] == 3 and res[1, 1] == 1  # $1,000/day needs 3 days; $3,000/day needs 1
+
+
+@pytest.mark.parametrize("spec", [EOD, INTRA])
+def test_eval_path_matches_sim_eval(spec) -> None:
+    rng = np.random.default_rng(5)
+    p = pnl([[bar(c, low=min(0, c) - abs(e), high=max(0, c) + abs(e))
+              for c, e in zip(rng.normal(20, 400, 3), rng.normal(0, 300, 3), strict=True)]
+             for _ in range(300)])  # fmt: skip
+    sz = sizes(p, 1)
+    for s0 in range(0, 250, 7):
+        a = run_eval(p, spec, s0=s0)[0]
+        b = sim.eval_path(
+            p["d_close"], p["d_low"], p["d_high"], p["sess_start"], p["sess_day"], s0, sz,
+            spec.balance, spec.target, spec.drawdown, spec.eval_dll, spec.eval_max_micros,
+            spec.eval_trail, spec.eval_trail_cap, spec.access_days,
+        )[0]  # fmt: skip
+        assert a == b

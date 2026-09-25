@@ -51,8 +51,10 @@ def _session(bal, thr, peak, trail, cap, dd, dll, size, d_close, d_low, d_high, 
 @njit(cache=True)
 def sim_eval(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, target, dd, dll,
              max_micros, trail, cap, access_days):  # fmt: skip
-    """Returns (outcome, last_session, sessions_used, largest_day_share_of_profit)."""
-    size = min(size, max_micros)
+    """Returns (outcome, last_session, sessions_used, largest_day_share_of_profit).
+
+    ``size`` is the number of micros per session (array, one entry per session).
+    """
     bal, thr, peak = start, start - dd, start
     best_day = 0.0
     n = len(sess_start) - 1
@@ -61,7 +63,7 @@ def sim_eval(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, targ
             return EXPIRED, s, s - s0, 0.0
         day_start = bal
         bal, thr, peak, code = _session(
-            bal, thr, peak, trail, cap, dd, dll, size, d_close, d_low, d_high,
+            bal, thr, peak, trail, cap, dd, dll, min(size[s], max_micros), d_close, d_low, d_high,
             sess_start[s], sess_start[s + 1],
         )  # fmt: skip
         if code == BREACH:
@@ -88,7 +90,7 @@ def sim_pa(d_close, d_low, d_high, sess_start, s1, size, start, dd, trail, cap, 
         for t in range(len(tier_from)):
             if bal - start >= tier_from[t]:
                 tier = t
-        sz = min(size, tier_micros[tier])
+        sz = min(size[s], tier_micros[tier])
         day_start = bal
         bal, thr, peak, code = _session(
             bal, thr, peak, trail, cap, dd, tier_dll[tier], sz, d_close, d_low, d_high,
@@ -161,8 +163,13 @@ COLUMNS = (
 )
 
 
-def run_many(pnl: dict[str, np.ndarray], starts: np.ndarray, size_micros: int, spec: ChallengeSpec):
-    """Simulate one purchased challenge per start session. Returns an (m, 9) array (COLUMNS)."""
+def run_many(pnl: dict[str, np.ndarray], starts: np.ndarray, size_micros, spec: ChallengeSpec):
+    """Simulate one purchased challenge per start session. Returns an (m, 9) array (COLUMNS).
+
+    ``size_micros``: an int, or an array with one size per session (walk-forward folds).
+    """
+    n_sess = len(pnl["sess_start"]) - 1
+    sizes = np.broadcast_to(np.asarray(size_micros, dtype=np.int64), (n_sess,)).copy()
     tier_from, tier_micros, tier_dll = spec.tiers()
     e_args = (
         spec.balance, spec.target, spec.drawdown, spec.eval_dll, float(spec.eval_max_micros),
@@ -175,6 +182,38 @@ def run_many(pnl: dict[str, np.ndarray], starts: np.ndarray, size_micros: int, s
     )  # fmt: skip
     return _run_many(
         pnl["d_close"], pnl["d_low"], pnl["d_high"], pnl["sess_start"], pnl["sess_day"],
-        np.asarray(starts, dtype=np.int64), int(size_micros), e_args, p_args,
+        np.asarray(starts, dtype=np.int64), sizes, e_args, p_args,
         tier_from, tier_micros, tier_dll, np.asarray(spec.payout_caps, dtype=np.float64),
     )  # fmt: skip
+
+
+@njit(cache=True)
+def eval_path(d_close, d_low, d_high, sess_start, sess_day, s0, size, start, target, dd, dll,
+              max_micros, trail, cap, access_days):  # fmt: skip
+    """Same rules as ``sim_eval`` but records the closing balance and threshold each session.
+
+    Report-only (fan charts). A test pins it to ``sim_eval``'s outcome.
+    """
+    bal_out = np.full(access_days + 1, np.nan)
+    thr_out = np.full(access_days + 1, np.nan)
+    bal, thr, peak = start, start - dd, start
+    bal_out[0], thr_out[0] = bal, thr
+    n = len(sess_start) - 1
+    k = 0
+    for s in range(s0, n):
+        if sess_day[s] - sess_day[s0] >= access_days:
+            return EXPIRED, bal_out, thr_out
+        bal, thr, peak, code = _session(
+            bal, thr, peak, trail, cap, dd, dll, min(size[s], max_micros), d_close, d_low, d_high,
+            sess_start[s], sess_start[s + 1],
+        )  # fmt: skip
+        k += 1
+        if trail != TRAIL_INTRADAY:
+            thr = max(thr, min(bal - dd, cap))
+        if k <= access_days:
+            bal_out[k], thr_out[k] = bal, thr
+        if code == BREACH:
+            return FAIL, bal_out, thr_out
+        if bal >= start + target:
+            return PASS, bal_out, thr_out
+    return NO_DATA, bal_out, thr_out

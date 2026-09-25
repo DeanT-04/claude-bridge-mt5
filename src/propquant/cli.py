@@ -121,3 +121,25 @@ def firms_note(firm: str = typer.Argument("apex")) -> None:
     from propquant.firms import note
 
     console.print(note.write(firm))
+
+
+gauntlet_app = typer.Typer(no_args_is_help=True, help="Run strategies through the gauntlet.")
+app.add_typer(gauntlet_app, name="gauntlet")
+
+
+@gauntlet_app.command("run")
+def gauntlet_run(
+    strategy: str = typer.Argument(..., help="Registered strategy name"),
+    symbol: str = typer.Option("NQ"),
+    force_holdout: bool = typer.Option(False, help="Re-open the holdout (logged as forced)"),
+) -> None:
+    """Walk-forward -> challenge Monte Carlo -> stats -> holdout -> verdict + vault note."""
+    from propquant.gauntlet import run as grun
+    from propquant.reports import strategy as report
+
+    res = grun.run(strategy, symbol, force_holdout=force_holdout, progress=console.print)
+    for ck in res.checks:
+        r = ck.row()
+        console.print(f"  {r['result']:>4}  {r['gate']:<34} {r['value']:>10.3f}  {r['needs']}")
+    console.print(f"[bold]{strategy}: {res.verdict.upper()}[/bold]  (run {res.run_id})")
+    console.print(report.write(res))

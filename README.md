@@ -16,8 +16,8 @@ The previous MT5 project is archived on the `archive/mt5-bridge` branch.
 | P1 | Data: Dukascopy proxy bars, yfinance futures, tracking report | ✅ NQ done; ES downloading |
 | P2 | Apex rules, verified and tested | ✅ done |
 | P3 | numba backtest engine plus anti-cheating tests | ✅ done |
-| P4 | Gauntlet, challenge Monte Carlo, visual reports | next |
-| P5 | Autonomous research ingestion | — |
+| P4 | Gauntlet, challenge Monte Carlo, visual reports | ✅ done |
+| P5 | Autonomous research ingestion | next |
 | P6 | Strategy factory | — |
 | P7 | Portfolios, then FTMO and Blueberry | — |
 
@@ -36,6 +36,13 @@ All gates are measured out-of-sample, across at least 1,000 challenge simulation
   - A numba bar loop with pessimistic fills: the stop wins when stop and target are both hit in a bar, gaps fill at the open, limit orders must trade through, and targets aren't credited on the entry bar.
   - Known-answer tests, plus property-based **lookahead tests**: changing any future bar never changes past results.
   - Speed on this laptop: about 290 full 10.7-year 1m backtests per minute, and about 60,000 challenge simulations per second.
+- **The gauntlet has been checked in both directions.**
+  - A random-entry control goes to the Graveyard: it beats only 47% of random-timing runs and has a Deflated Sharpe of 0.
+  - On synthetic data with a planted edge, the edge is found (DSR 1.00, beats 100% of random entries). The same strategy with no planted edge is rejected.
+  - The holdout can only be opened once per configuration.
+- **Calibration against Apex's rules** (see the vault lesson *85 percent pass needs an extreme edge*):
+  - An 85% evaluation pass rate needs an annualised Sharpe of about 8 or more, because the 30-day window is the rule that binds.
+  - Expected profit per attempt turns positive at a Sharpe of about 2.
 - **Apex's rules are verified** from Internet Archive captures of Apex's own help pages (the live site blocks bots). Both plan types, EOD and Intraday trailing, are encoded in `config/firms/apex.yaml`. Each rule cites its source, and every unresolved question is listed in that file. 50K list prices: EOD evaluation $550 plus $139 activation; Intraday evaluation $249 plus $59 activation.
 - **The challenge simulator** (`propquant.firms.sim`) runs the evaluation, then the funded account, then payouts. It covers trailing type and lock level, the daily loss limit, the 30-day access window, PA scaling tiers, the 5 qualifying days, 50% consistency, the safety net and the payout caps. Where a bar is ambiguous it assumes the worst case, and each rule has a boundary test.
 
@@ -52,6 +59,7 @@ uv run propquant data build --symbol NQ     # mid bars 1m/5m/15m/1h + data-quali
 uv run propquant data collect --symbol NQ   # real futures bars from Yahoo (run daily)
 uv run propquant data tracking --symbol NQ  # proxy-vs-futures fidelity report + charts
 uv run propquant firms note apex            # write verified firm rules into the vault
+uv run propquant gauntlet run control_random  # full gauntlet + evidence note in the vault
 ```
 
 Environment overrides: `PROPQUANT_VAULT` (vault path), `PROPQUANT_DATA` (data directory; default `data/`, gitignored).

@@ -24,7 +24,7 @@ def apply() -> None:
             "axes.edgecolor": GRID,
             "axes.labelcolor": TEXT_2,
             "axes.titlecolor": TEXT,
-            "axes.titleweight": "semibold",
+            "axes.titleweight": "bold",
             "axes.titlesize": 11,
             "axes.labelsize": 9,
             "axes.grid": True,

@@ -1,0 +1,35 @@
+# Research protocol. Fixed BEFORE testing any strategy; changing it later must be recorded
+# in the vault (Lessons/) with the reason, because it changes what every past result means.
+research_start: 2016-01-01   # proxy data before 2016 is unreliable (see Lessons)
+holdout_start: 2025-03-25    # locked: each strategy config may be evaluated here ONCE
+holdout_end: 2026-09-25
+
+walk_forward:
+  scheme: anchored           # train [research_start, test_start), test one year
+  first_test_year: 2019      # >= 3 years of training for the first fold
+  # the last fold tests 2025-01-01 .. holdout_start
+
+firm: {name: apex, plans: [eod, intraday], size: 50K}
+max_size_micros: 60          # search sizes 1..max (Apex 50K eval limit = 6 minis = 60 micros)
+costs: {slip_ticks: 1.0}
+
+challenge_mc:
+  min_runway_sessions: 120   # a start needs this many later sessions (eval + PA) or it is skipped
+  bootstrap: {n: 2000, block_sessions: 20, seed: 7}
+
+random_entry: {runs: 1000, seed: 11}
+
+gates:                        # all measured out-of-sample
+  end_to_end_payout: 0.60
+  eval_pass: 0.85
+  first_payout_given_pass: 0.70
+  median_sessions_to_pass: 15
+  p90_sessions_to_pass: 30
+  ev_per_attempt_p05: 0.0     # 5th pct bootstrap of expected profit per purchased eval (USD)
+  dsr: 0.95
+  random_entry_percentile: 0.95
+  min_oos_trades: 200
+  holdout: {min_pass_rate_drop: 0.15, min_daily_mean: 0.0}
+contender:                    # stats gates all pass; commercial gates narrowly missed
+  end_to_end_payout: 0.45
+  eval_pass: 0.70
